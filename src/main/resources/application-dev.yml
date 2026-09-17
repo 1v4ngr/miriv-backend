@@ -1,0 +1,19 @@
+logging:
+  level:
+    coop.miriv.enology: DEBUG
+    org.hibernate.SQL: DEBUG
+
+spring:
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/miriv}
+    username: ${DB_USERNAME:miriv}
+    password: ${DB_PASSWORD:miriv}
+  jpa:
+    properties:
+      hibernate:
+        format_sql: true
+
+app:
+  security:
+    jwt:
+      secret: ${JWT_SECRET:change-this-development-secret-must-be-at-least-32-bytes-long}
