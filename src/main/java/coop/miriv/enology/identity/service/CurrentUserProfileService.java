@@ -1,12 +1,15 @@
 package coop.miriv.enology.identity.service;
 
 import coop.miriv.enology.common.exception.NotFoundException;
+import coop.miriv.enology.identity.dto.CenterOption;
 import coop.miriv.enology.identity.dto.CurrentUserProfileResponse;
+import coop.miriv.enology.identity.dto.UpdateProfileRequest;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Service
 public class CurrentUserProfileService {
@@ -38,6 +41,35 @@ public class CurrentUserProfileService {
         String displayName = (profile.firstName() + " " + profile.lastName()).trim();
         return new CurrentUserProfileResponse(profile.username(), profile.email(), profile.firstName(), profile.lastName(),
             displayName, profile.avatarUrl(), profile.jobTitle(), profile.centerCode(), profile.centerName(), zones);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CenterOption> listCenters() {
+        return jdbc.query("select code, name from center order by name",
+            (rs, row) -> new CenterOption(rs.getString("code"), rs.getString("name")));
+    }
+
+    @Transactional
+    public CurrentUserProfileResponse updateCurrentProfile(UpdateProfileRequest request) {
+        UUID userId = currentUser.requireCurrentUserId();
+        int updated = jdbc.update(
+            "update user_profile set first_name = ?, last_name = ?, job_title = ?, avatar_url = ?, updated_at = now() "
+                + "where user_id = ?",
+            request.firstName().trim(),
+            StringUtils.hasText(request.lastName()) ? request.lastName().trim() : "",
+            StringUtils.hasText(request.jobTitle()) ? request.jobTitle().trim() : null,
+            StringUtils.hasText(request.avatarUrl()) ? request.avatarUrl().trim() : null,
+            userId);
+        if (updated == 0) throw new NotFoundException("Current user profile not found.");
+
+        if (StringUtils.hasText(request.centerCode())) {
+            List<UUID> centerIds = jdbc.query("select id from center where code = ?",
+                (rs, row) -> rs.getObject(1, UUID.class), request.centerCode().trim());
+            if (centerIds.isEmpty()) throw new NotFoundException("Unknown center code: " + request.centerCode());
+            jdbc.update("update app_user set center_id = ? where id = ?", centerIds.getFirst(), userId);
+        }
+
+        return getCurrentProfile();
     }
 
     private record ProfileRow(String username, String email, String firstName, String lastName, String avatarUrl,

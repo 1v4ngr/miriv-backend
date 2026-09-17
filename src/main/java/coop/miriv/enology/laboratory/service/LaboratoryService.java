@@ -8,6 +8,7 @@ import coop.miriv.enology.identity.repository.AppUserRepository;
 import coop.miriv.enology.identity.service.CurrentUserProvider;
 import coop.miriv.enology.laboratory.dto.CorrectionRequest;
 import coop.miriv.enology.laboratory.dto.NewSampleRequest;
+import coop.miriv.enology.laboratory.dto.PanelParameterResponse;
 import coop.miriv.enology.laboratory.dto.ResultInput;
 import coop.miriv.enology.laboratory.dto.ResultVersionResponse;
 import coop.miriv.enology.laboratory.dto.ResultsRequest;
@@ -212,6 +213,11 @@ public class LaboratoryService {
                 + "a.method_description from result r join parameter p on p.id = r.parameter_id "
                 + "join analysis a on a.id = r.analysis_id where r.analysis_id = ? and r.is_current = true "
                 + "order by p.name", (rs, index) -> result(rs, status), row.analysisId());
+        List<PanelParameterResponse> panelParameters = jdbc.query("select p.name, p.reference_unit, pp.required "
+                + "from analysis_panel_parameter pp join parameter p on p.id = pp.parameter_id "
+                + "where pp.panel_id = ? order by p.name",
+            (rs, index) -> new PanelParameterResponse(rs.getString("name"), rs.getString("reference_unit"),
+                rs.getBoolean("required")), row.panelId());
         String currentDeposit = jdbc.query("select d.code from occupation o join deposit d on d.id = o.deposit_id "
                 + "where o.content_unit_id = ? and o.end_at is null limit 1",
             (rs, index) -> rs.getString(1), row.contentId()).stream().findFirst().orElse(row.originDeposit());
@@ -221,7 +227,7 @@ public class LaboratoryService {
         return new SampleResponse(row.code(), row.originDeposit(), currentDeposit, row.contentCode(), row.lotCode(),
             row.category() == null ? "" : row.category(), row.takenAt().atZone(timezone).toLocalDateTime().toString(),
             takenDate, age, panelName(row.panelCode()), results.size(), required(row.panelId()), status,
-            row.responsible(), false, results, row.observations(),
+            row.responsible(), false, panelParameters, results, row.observations(),
             row.processedAt() == null ? null : row.processedAt().atZone(timezone).toLocalDate(),
             row.laboratory(), row.equipment(), row.method(), row.validationNote());
     }

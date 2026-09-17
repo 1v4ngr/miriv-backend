@@ -16,12 +16,14 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -33,11 +35,14 @@ public class LotService {
     private final JdbcTemplate jdbc;
     private final AppUserRepository users;
     private final CurrentUserProvider currentUser;
+    private final ZoneId timezone;
 
-    public LotService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser) {
+    public LotService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser,
+                       @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
         this.users = users;
         this.currentUser = currentUser;
+        this.timezone = ZoneId.of(timezone);
     }
 
     @Transactional(readOnly = true)
@@ -122,16 +127,17 @@ public class LotService {
         DepositSlot slot = slots.getFirst();
         if (!slot.status().equals("AVAILABLE")) throw new BusinessRuleException("The deposit is not available for entry.");
         if (entry.volumeLiters().compareTo(slot.capacity()) > 0) throw new BusinessRuleException("Entry volume exceeds useful capacity.");
+        Instant effectiveAt = entry.effectiveDate().atStartOfDay(timezone).toInstant();
         UUID movementId = UUID.randomUUID();
         String movementCode = "MOV-" + campaign + "-" + movementId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
         jdbc.update("insert into movement(id, code, type, status, effective_at, responsible_id, reason) values (?, ?, 'ENTRY'::movement_type, 'EXECUTED'::movement_status, ?, ?, ?)",
-            movementId, movementCode, Timestamp.from(entry.effectiveDate()), responsibleId, "Initial lot entry " + lotCode);
+            movementId, movementCode, Timestamp.from(effectiveAt), responsibleId, "Initial lot entry " + lotCode);
         UUID contentId = UUID.randomUUID();
         String contentCode = "C-" + campaign + "-" + contentId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
         jdbc.update("insert into content_unit(id, code, lot_id, category_id, volume_liters) values (?, ?, ?, ?, ?)",
             contentId, contentCode, lotId, categoryId, entry.volumeLiters());
         jdbc.update("insert into occupation(id, content_unit_id, deposit_id, start_at, volume_liters) values (?, ?, ?, ?, ?)",
-            UUID.randomUUID(), contentId, slot.id(), Timestamp.from(entry.effectiveDate()), entry.volumeLiters());
+            UUID.randomUUID(), contentId, slot.id(), Timestamp.from(effectiveAt), entry.volumeLiters());
         jdbc.update("insert into movement_line(id, movement_id, destination_content_unit_id, destination_deposit_id, volume_liters) values (?, ?, ?, ?, ?)",
             UUID.randomUUID(), movementId, contentId, slot.id(), entry.volumeLiters());
         jdbc.update("update deposit set status = 'OCCUPIED'::deposit_status, updated_at = ? where id = ?", Timestamp.from(Instant.now()), slot.id());

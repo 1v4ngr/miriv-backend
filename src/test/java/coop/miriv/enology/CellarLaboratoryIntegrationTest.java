@@ -87,10 +87,9 @@ class CellarLaboratoryIntegrationTest {
         String lotCode = "T-L-" + suffix;
         deposits.create(new DepositRequest(source, "CENTRO-NORTE", "NAVE-A", "1", new BigDecimal("2000"), "Steel", false));
         deposits.create(new DepositRequest(target, "CENTRO-NORTE", "NAVE-A", "2", new BigDecimal("1000"), "Steel", false));
-        Instant entryTime = Instant.now().minusSeconds(7200);
         lots.create(new CreateLotRequest(new LotRequest(lotCode, LocalDate.now(TIMEZONE).getYear(),
             "Tinto", "Vino tranquilo", "María Solana", LocalDate.now(TIMEZONE), "Reception 123", "Tempranillo"),
-            new LotEntryRequest(source, new BigDecimal("1000"), entryTime)));
+            new LotEntryRequest(source, new BigDecimal("1000"), LocalDate.now(TIMEZONE))));
         LocalDateTime movementTime = LocalDateTime.now(TIMEZONE).minusHours(1);
         var movement = movements.register(new MovementRequest("Trasiego", movementTime.toLocalDate(),
             movementTime.toLocalTime().withNano(0), "María Solana", "Routine transfer", source, target,
@@ -124,13 +123,18 @@ class CellarLaboratoryIntegrationTest {
             List.of(new ResultInput("pH", "3,42", "", null, null)), "Borrador",
             LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals(1, updated.completed());
+        assertEquals(9, updated.panelParameters().size());
         assertThrows(BusinessRuleException.class, () -> laboratory.validate(sampleCode, "Reviewed"));
         var complete = laboratory.saveResults(sampleCode, new ResultsRequest(List.of(
             new ResultInput("pH", "3,42", "", null, null),
             new ResultInput("Densidad", "0,996", "g/mL", null, null),
             new ResultInput("Acidez volátil", "0,72", "g/L", null, null),
             new ResultInput("Azúcares reductores", "4,8", "g/L", null, null),
-            new ResultInput("Temperatura", "18,6", "°C", null, null)),
+            new ResultInput("Temperatura del contenido", "18,6", "°C", null, null),
+            new ResultInput("Etanol", "12,4", "% vol.", null, null),
+            new ResultInput("Glucosa más fructosa", "3,1", "g/L", null, null),
+            new ResultInput("Acidez total", "5,4", "g/L como tartárico", null, null),
+            new ResultInput("CO2 disuelto", "850", "mg/L", null, null)),
             "Pendiente validar", LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals("Pendiente validar", complete.status());
         assertEquals("Validado", laboratory.validate(sampleCode, "Reviewed").status());

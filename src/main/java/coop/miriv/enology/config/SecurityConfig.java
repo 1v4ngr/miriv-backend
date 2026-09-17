@@ -2,6 +2,7 @@ package coop.miriv.enology.config;
 
 import coop.miriv.enology.security.JwtAuthenticationFilter;
 import coop.miriv.enology.security.JwtProperties;
+import jakarta.servlet.http.HttpServletResponse;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -16,6 +17,7 @@ import org.springframework.security.config.annotation.web.configurers.AbstractHt
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
@@ -45,11 +47,18 @@ public class SecurityConfig {
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
+    public AuthenticationEntryPoint authenticationEntryPoint() {
+        return (request, response, authException) -> response.sendError(HttpServletResponse.SC_UNAUTHORIZED);
+    }
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource,
+                                            AuthenticationEntryPoint authenticationEntryPoint) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint))
             .authorizeHttpRequests(authorize -> authorize
                 .requestMatchers("/api/auth/**", "/docs/**", "/v3/api-docs/**", "/actuator/health").permitAll()
                 .anyRequest().authenticated())

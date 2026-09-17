@@ -40,4 +40,4 @@ Run `mvn test` with Java 25 and a local PostgreSQL database matching the `dev` c
 
 ## Remaining scope
 
-The functional analysis also covers plan templates and phase criteria, operations, automated rule evaluation and incident creation, reports, notifications and administration. Their tables exist, but their complete REST workflows are not yet implemented. The frontend still defaults to mock APIs; its `real` mode needs a shared authenticated HTTP client and further endpoint integration before it can replace the mocks end to end.
+The functional analysis also covers plan templates and phase criteria, operations, automated rule evaluation and incident creation, reports, notifications and administration. Their tables exist, but their complete REST workflows are not yet implemented. The frontend has no mock mode left: it always talks to this API through a shared authenticated HTTP client, and the screens for the areas above (plans beyond a single content's elaboration plan, operations, rules, reports, administration, audit) still show static placeholder content because there is nothing on this backend for them to call yet.

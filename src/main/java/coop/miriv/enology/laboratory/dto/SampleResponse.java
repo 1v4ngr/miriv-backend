@@ -19,6 +19,7 @@ public record SampleResponse(
     String status,
     String responsible,
     boolean overdue,
+    List<PanelParameterResponse> panelParameters,
     List<SampleResultResponse> results,
     String observations,
     LocalDate processedAt,
