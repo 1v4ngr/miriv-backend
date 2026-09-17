@@ -1,6 +1,7 @@
 package coop.miriv.enology.identity.web;
 
 import coop.miriv.enology.identity.dto.AdminUserResponse;
+import coop.miriv.enology.identity.dto.CreateAdminUserRequest;
 import coop.miriv.enology.identity.dto.UpdateUserCentersRequest;
 import coop.miriv.enology.identity.service.AdminUserService;
 import jakarta.validation.Valid;

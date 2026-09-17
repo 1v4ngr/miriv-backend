@@ -34,10 +34,8 @@ public class CurrentUserProfileService {
                     rs.getString("center_code"), rs.getString("center_name")), userId);
         if (rows.isEmpty()) throw new NotFoundException("Current user profile not found.");
         ProfileRow profile = rows.getFirst();
-        List<String> zones = jdbc.query("select distinct z.name from zone z where z.center_id = (select center_id from app_user where id = ?) "
-                + "and (exists (select 1 from app_user_role ur where ur.user_id = ? and ur.zone_id is null) "
-                + "or z.id in (select zone_id from app_user_role where user_id = ? and zone_id is not null)) order by z.name",
-            (rs, row) -> rs.getString(1), userId, userId, userId);
+        List<String> zones = jdbc.query("select distinct z.name from zone z where z.center_id = (select center_id from app_user where id = ?) order by z.name",
+            (rs, row) -> rs.getString(1), userId);
         String displayName = (profile.firstName() + " " + profile.lastName()).trim();
         return new CurrentUserProfileResponse(profile.username(), profile.email(), profile.firstName(), profile.lastName(),
             displayName, profile.avatarUrl(), profile.jobTitle(), profile.centerCode(), profile.centerName(), zones);
