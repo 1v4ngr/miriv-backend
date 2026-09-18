@@ -174,10 +174,7 @@ public class DepositService {
     private DepositResponse response(Deposit deposit,
                                      Map<UUID, List<OccupationResponse>> occupations,
                                      Map<UUID, List<CleaningRecordResponse>> cleaning) {
-        String status = switch (deposit.getStatus()) {
-            case PENDING_CLEANING, CLEANING -> "cleaning";
-            default -> deposit.getStatus().name().toLowerCase(Locale.ROOT);
-        };
+        String status = deposit.getStatus().name().toLowerCase(Locale.ROOT);
         return new DepositResponse(deposit.getId(), deposit.getCode(), deposit.getCenter().getName(),
             deposit.getZone() == null ? "Unassigned" : deposit.getZone().getName(),
             deposit.getPosition() == null ? "" : deposit.getPosition(),
