@@ -19,3 +19,4 @@ app:
   security:
     jwt:
       secret: ${JWT_SECRET:change-this-development-secret-must-be-at-least-32-bytes-long}
+      access-token-minutes: 480
