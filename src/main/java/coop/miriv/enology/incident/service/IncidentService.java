@@ -142,9 +142,9 @@ public class IncidentService {
 
     private UUID responsibleId(String value, UUID centerId) {
         List<UUID> ids = jdbc.query("select id from app_user where center_id = ? and active = true "
-                + "and (lower(full_name) = lower(?) or lower(username) = lower(?) or lower(email) = lower(?))",
-            (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim(), value.trim());
-        if (ids.isEmpty()) throw new NotFoundException("Responsible user not found in the current center.");
+                + "and (lower(username) = lower(?) or lower(email) = lower(?))",
+            (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim());
+        if (ids.isEmpty()) throw new NotFoundException("Responsable no encontrado en el centro actual: " + value);
         return ids.getFirst();
     }
 

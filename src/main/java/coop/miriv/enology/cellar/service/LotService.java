@@ -154,9 +154,10 @@ public class LotService {
     }
 
     private UUID responsibleId(String value, UUID centerId) {
-        List<UUID> ids = jdbc.query("select id from app_user where center_id = ? and active = true and (lower(full_name) = lower(?) or lower(username) = lower(?) or lower(email) = lower(?))",
-            (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim(), value.trim());
-        if (ids.isEmpty()) throw new NotFoundException("Responsible user not found in the current center.");
+        List<UUID> ids = jdbc.query("select id from app_user where center_id = ? and active = true "
+                + "and (lower(username) = lower(?) or lower(email) = lower(?))",
+            (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim());
+        if (ids.isEmpty()) throw new NotFoundException("Responsable no encontrado en el centro actual: " + value);
         return ids.getFirst();
     }
 
@@ -181,7 +182,7 @@ public class LotService {
         for (LotRow row : rows) result.add(new LotResponse(row.code(), row.campaign(),
             row.category() == null ? "Unclassified" : row.category(),
             row.destination() == null ? "Pending" : row.destination(),
-            row.responsible(), row.entryDate(), row.origin() == null ? "" : row.origin(),
+            row.responsible(), row.responsibleUsername(), row.entryDate(), row.origin() == null ? "" : row.origin(),
             String.join(", ", varieties.get(row.id())), row.archived(), content.get(row.id())));
         return result;
     }
@@ -189,6 +190,7 @@ public class LotService {
     private LotRow row(ResultSet rs) throws SQLException {
         return new LotRow(rs.getObject("id", UUID.class), rs.getString("code"), rs.getInt("campaign"),
             rs.getString("category"), rs.getString("destination"), rs.getString("responsible"),
+            rs.getString("responsible_username"),
             rs.getDate("entry_date").toLocalDate(), rs.getString("origin_summary"), rs.getBoolean("archived"));
     }
 
@@ -196,12 +198,12 @@ public class LotService {
     private String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
 
     private static final String LOT_SELECT = "select l.id, l.code, l.campaign, c.name as category, d.name as destination, "
-        + "u.full_name as responsible, l.entry_date, l.origin_summary, l.archived from lot l "
+        + "u.full_name as responsible, u.username as responsible_username, l.entry_date, l.origin_summary, l.archived from lot l "
         + "join app_user u on u.id = l.responsible_id "
         + "left join internal_category c on c.id = l.category_id "
         + "left join destination d on d.id = l.destination_id";
 
     private record LotRow(UUID id, String code, int campaign, String category, String destination,
-                          String responsible, java.time.LocalDate entryDate, String origin, boolean archived) {}
+                          String responsible, String responsibleUsername, java.time.LocalDate entryDate, String origin, boolean archived) {}
     private record DepositSlot(UUID id, String status, java.math.BigDecimal capacity) {}
 }

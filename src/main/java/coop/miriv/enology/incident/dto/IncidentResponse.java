@@ -11,6 +11,7 @@ public record IncidentResponse(
     String priority,
     String status,
     String responsible,
+    String responsibleUsername,
     Instant openedAt,
     Instant silencedUntil,
     String resolution,

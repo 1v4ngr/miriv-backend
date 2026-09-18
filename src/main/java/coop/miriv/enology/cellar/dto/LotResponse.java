@@ -9,6 +9,7 @@ public record LotResponse(
     String category,
     String destination,
     String responsible,
+    String responsibleUsername,
     LocalDate entryDate,
     String origin,
     String variety,

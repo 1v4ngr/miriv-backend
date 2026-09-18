@@ -115,6 +115,7 @@ public class TaskService {
     private TaskResponse response(ResultSet rs) throws SQLException {
         return new TaskResponse(rs.getString("code"), rs.getString("title"), rs.getString("deposit_code"),
             rs.getString("content_code"), rs.getString("responsible"),
+            rs.getString("responsible_username"),
             rs.getTimestamp("due_at") == null ? null : rs.getTimestamp("due_at").toInstant(),
             rs.getString("priority"), rs.getString("status"), rs.getString("completion_criterion"),
             rs.getTimestamp("executed_at") == null ? null : rs.getTimestamp("executed_at").toInstant(),
@@ -169,9 +170,9 @@ public class TaskService {
 
     private UUID responsibleId(String value, UUID centerId) {
         List<UUID> ids = jdbc.query("select id from app_user where center_id = ? and active = true "
-                + "and (lower(full_name) = lower(?) or lower(username) = lower(?) or lower(email) = lower(?))",
-            (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim(), value.trim());
-        if (ids.isEmpty()) throw new NotFoundException("Responsible user not found in the current center.");
+                + "and (lower(username) = lower(?) or lower(email) = lower(?))",
+            (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim());
+        if (ids.isEmpty()) throw new NotFoundException("Responsable no encontrado en el centro actual: " + value);
         return ids.getFirst();
     }
 
@@ -187,7 +188,7 @@ public class TaskService {
     private String blankToNull(String value) { return value == null || value.isBlank() ? null : value.trim(); }
 
     private static final String TASK_SELECT = "select t.code, t.title, d.code as deposit_code, "
-        + "cu.code as content_code, u.full_name as responsible, t.due_at, t.priority::text, "
+        + "cu.code as content_code, u.full_name as responsible, u.username as responsible_username, t.due_at, t.priority::text, "
         + "t.status::text, t.completion_criterion, execution.executed_at, execution.result, "
         + "execution.observations from task t join deposit d on d.id = t.deposit_id "
         + "left join content_unit cu on cu.id = t.content_unit_id "

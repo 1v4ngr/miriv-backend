@@ -8,6 +8,7 @@ public record TaskResponse(
     String depositCode,
     String contentCode,
     String responsible,
+    String responsibleUsername,
     Instant dueAt,
     String priority,
     String status,
