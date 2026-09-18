@@ -129,46 +129,20 @@ public class DepositService {
     }
 
     @Transactional
-    public void delete(String code) {
+    public DepositResponse deactivate(String code) {
         AppUser user = context.user();
         Center center = context.center();
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
-            .orElseThrow(() -> new NotFoundException("Deposit not found."));
+            .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
         requireManagementZone(user, deposit.getZone());
-        UUID depositId = deposit.getId();
-
-        jdbc.update("update incident_evidence set result_id = null where result_id in ("
-                + "select r.id from result r join analysis a on a.id = r.analysis_id join sample s on s.id = a.sample_id "
-                + "where s.deposit_id_at_sampling = ?)", depositId);
-        jdbc.update("update incident_evidence set sample_id = null where sample_id in "
-                + "(select id from sample where deposit_id_at_sampling = ?)", depositId);
-        jdbc.update("update task_execution set sample_id = null where sample_id in "
-                + "(select id from sample where deposit_id_at_sampling = ?)", depositId);
-        jdbc.update("delete from result where analysis_id in (select a.id from analysis a join sample s on s.id = a.sample_id "
-                + "where s.deposit_id_at_sampling = ?)", depositId);
-        jdbc.update("delete from analysis where sample_id in (select id from sample where deposit_id_at_sampling = ?)", depositId);
-        jdbc.update("delete from sample where deposit_id_at_sampling = ?", depositId);
-
-        jdbc.update("delete from task_execution where task_id in (select id from task where deposit_id = ?)", depositId);
-        jdbc.update("delete from task where deposit_id = ?", depositId);
-        jdbc.update("update task set source_incident_id = null where source_incident_id in "
-                + "(select id from incident where deposit_id = ?)", depositId);
-        jdbc.update("delete from incident_evidence where incident_id in (select id from incident where deposit_id = ?)", depositId);
-        jdbc.update("delete from incident_event where incident_id in (select id from incident where deposit_id = ?)", depositId);
-        jdbc.update("delete from incident where deposit_id = ?", depositId);
-
-        jdbc.update("delete from operation_addition where operation_id in (select id from operation where deposit_id = ?)", depositId);
-        jdbc.update("delete from operation where deposit_id = ?", depositId);
-        jdbc.update("delete from content_unit_lineage where movement_id in (select distinct movement_id from movement_line "
-                + "where source_deposit_id = ? or destination_deposit_id = ?)", depositId, depositId);
-        jdbc.update("delete from movement_line where movement_id in (select distinct movement_id from movement_line "
-                + "where source_deposit_id = ? or destination_deposit_id = ?)", depositId, depositId);
-
-        jdbc.update("delete from deposit_capacity_adjustment where deposit_id = ?", depositId);
-        jdbc.update("delete from deposit_cleaning_record where deposit_id = ?", depositId);
-        jdbc.update("delete from occupation where deposit_id = ?", depositId);
-        deposits.delete(deposit);
+        if (readRepository.activeVolume(deposit.getId()).signum() > 0) {
+            throw new BusinessRuleException("No se puede desactivar un depósito con contenido.");
+        }
+        deposit.setActive(false);
+        deposit.setUpdatedAt(Instant.now());
+        deposits.saveAndFlush(deposit);
+        return response(deposit, Map.of(), Map.of());
     }
 
     private DepositResponse response(Deposit deposit,
