@@ -1,3 +1,9 @@
 spring:
   flyway:
     enabled: true
+    locations: classpath:db/migration,classpath:db/dev-seed
+
+app:
+  security:
+    jwt:
+      secret: test-secret-test-secret-test-secret-test-secret-1234

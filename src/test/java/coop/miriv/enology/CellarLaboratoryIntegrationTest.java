@@ -29,6 +29,7 @@ import coop.miriv.enology.plan.service.PlanService;
 import coop.miriv.enology.task.dto.CompleteTaskRequest;
 import coop.miriv.enology.task.dto.CreateTaskRequest;
 import coop.miriv.enology.task.service.TaskService;
+import coop.miriv.enology.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -40,7 +41,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -50,9 +50,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@SpringBootTest
 @Transactional
-class CellarLaboratoryIntegrationTest {
+class CellarLaboratoryIntegrationTest extends IntegrationTest {
 
     private static final ZoneId TIMEZONE = ZoneId.of("Europe/Madrid");
 
@@ -71,7 +70,7 @@ class CellarLaboratoryIntegrationTest {
 
     @BeforeEach
     void authenticate() {
-        AppUserPrincipal principal = new AppUserPrincipal(users.findByUsernameAndActiveTrue("ivangoru22").orElseThrow());
+        AppUserPrincipal principal = new AppUserPrincipal(users.findByUsernameAndActiveTrue("enologo").orElseThrow());
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
             principal, null, principal.getAuthorities()));
     }
@@ -117,20 +116,19 @@ class CellarLaboratoryIntegrationTest {
         String sampleCode = "T-M-" + suffix;
         var sample = laboratory.create(new NewSampleRequest(sampleCode, target,
             movement.destinationContentCode(), lotCode, "Tinto", takenAt, takenAt.toLocalDate(),
-            "Control", "María Solana", null));
+            "Control", "María Solana", null, null));
         assertEquals(movement.destinationContentCode(), sample.contentCode());
         var updated = laboratory.saveResults(sampleCode, new ResultsRequest(
             List.of(new ResultInput("pH", "3,42", "", null, null)), "Borrador",
             LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals(1, updated.completed());
-        assertEquals(9, updated.panelParameters().size());
+        assertEquals(8, updated.panelParameters().size());
         assertThrows(BusinessRuleException.class, () -> laboratory.validate(sampleCode, "Reviewed"));
         var complete = laboratory.saveResults(sampleCode, new ResultsRequest(List.of(
             new ResultInput("pH", "3,42", "", null, null),
             new ResultInput("Densidad", "0,996", "g/mL", null, null),
             new ResultInput("Acidez volátil", "0,72", "g/L", null, null),
             new ResultInput("Azúcares reductores", "4,8", "g/L", null, null),
-            new ResultInput("Temperatura del contenido", "18,6", "°C", null, null),
             new ResultInput("Etanol", "12,4", "% vol.", null, null),
             new ResultInput("Glucosa más fructosa", "3,1", "g/L", null, null),
             new ResultInput("Acidez total", "5,4", "g/L como tartárico", null, null),
