@@ -17,7 +17,9 @@ import jakarta.validation.Valid;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,6 +27,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -53,8 +56,8 @@ public class CatalogController {
     }
 
     @GetMapping("/product-types")
-    public List<CatalogItemResponse> productTypes() {
-        return productTypes.listActive();
+    public List<CatalogItemResponse> productTypes(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return listFor(productTypes, includeInactive);
     }
 
     @PostMapping("/product-types")
@@ -78,8 +81,8 @@ public class CatalogController {
     }
 
     @GetMapping("/colors")
-    public List<CatalogItemResponse> colors() {
-        return colors.listActive();
+    public List<CatalogItemResponse> colors(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return listFor(colors, includeInactive);
     }
 
     @PostMapping("/colors")
@@ -96,8 +99,8 @@ public class CatalogController {
     }
 
     @GetMapping("/destinations")
-    public List<CatalogItemResponse> destinations() {
-        return destinations.listActive();
+    public List<CatalogItemResponse> destinations(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return listFor(destinations, includeInactive);
     }
 
     @PostMapping("/destinations")
@@ -114,8 +117,8 @@ public class CatalogController {
     }
 
     @GetMapping("/internal-categories")
-    public List<CatalogItemResponse> internalCategories() {
-        return internalCategories.listActive();
+    public List<CatalogItemResponse> internalCategories(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return listFor(internalCategories, includeInactive);
     }
 
     @PostMapping("/internal-categories")
@@ -132,8 +135,8 @@ public class CatalogController {
     }
 
     @GetMapping("/varieties")
-    public List<CatalogItemResponse> varieties() {
-        return varieties.listActive();
+    public List<CatalogItemResponse> varieties(@RequestParam(defaultValue = "false") boolean includeInactive) {
+        return listFor(varieties, includeInactive);
     }
 
     @PostMapping("/varieties")
@@ -147,5 +150,13 @@ public class CatalogController {
     @PreAuthorize("hasRole('ADMIN')")
     public CatalogItemResponse setVarietyActive(@PathVariable UUID id, @RequestBody boolean active) {
         return varieties.setActive(id, active);
+    }
+
+    private <T extends coop.miriv.enology.catalog.entity.CatalogEntry> List<CatalogItemResponse> listFor(CatalogCrudService<T> service, boolean includeInactive) {
+        if (!includeInactive) return service.listActive();
+        boolean admin = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+            .anyMatch((authority) -> authority.getAuthority().equals("ROLE_ADMIN"));
+        if (!admin) throw new AccessDeniedException("Only administrators can list inactive catalog items.");
+        return service.listAll();
     }
 }
