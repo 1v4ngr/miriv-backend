@@ -87,7 +87,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         deposits.create(new DepositRequest(source, "CENTRO-NORTE", "NAVE-A", "1", new BigDecimal("2000"), "Steel", false));
         deposits.create(new DepositRequest(target, "CENTRO-NORTE", "NAVE-A", "2", new BigDecimal("1000"), "Steel", false));
         lots.create(new CreateLotRequest(new LotRequest(lotCode, LocalDate.now(TIMEZONE).getYear(),
-            "Tinto", "Vino tranquilo", "enologo", LocalDate.now(TIMEZONE), "Reception 123", "Tempranillo"),
+            "Tinto", "Vino tranquilo", "enologo", LocalDate.now(TIMEZONE), "Reception 123", List.of("Tempranillo")),
             new LotEntryRequest(source, new BigDecimal("1000"), LocalDate.now(TIMEZONE))));
         LocalDateTime movementTime = LocalDateTime.now(TIMEZONE).minusHours(1);
         var movement = movements.register(new MovementRequest("Trasiego", movementTime.toLocalDate(),

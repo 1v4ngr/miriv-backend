@@ -93,7 +93,7 @@ public class LotService {
         UUID lotId = UUID.randomUUID();
         jdbc.update("insert into lot(id, code, center_id, campaign, category_id, destination_id, entry_date, responsible_id, origin_summary) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             lotId, code, centerId, lot.campaign(), categoryId, destinationId, lot.entryDate(), responsibleId, blankToNull(lot.origin()));
-        saveVariety(lotId, lot.variety());
+        saveVarieties(lotId, lot.varieties());
         if (request.entry() != null) {
             createEntry(lotId, code, lot.campaign(), categoryId, responsibleId, centerId, request.entry());
         }
@@ -109,7 +109,7 @@ public class LotService {
         jdbc.update("update lot set destination_id = ?, responsible_id = ?, origin_summary = ? where id = ?",
             destinationId, responsibleId, blankToNull(request.origin()), lot.id());
         jdbc.update("delete from lot_variety where lot_id = ?", lot.id());
-        saveVariety(lot.id(), request.variety());
+        saveVarieties(lot.id(), request.varieties());
         return get(code);
     }
 
@@ -146,11 +146,14 @@ public class LotService {
         return ids.getFirst();
     }
 
-    private void saveVariety(UUID lotId, String value) {
-        if (value == null || value.isBlank()) return;
-        List<UUID> ids = jdbc.query("select id from variety where active = true and (lower(name) = lower(?) or lower(code) = lower(?))",
-            (rs, index) -> rs.getObject(1, UUID.class), value.trim(), value.trim());
-        if (!ids.isEmpty()) jdbc.update("insert into lot_variety(id, lot_id, variety_id) values (?, ?, ?)", UUID.randomUUID(), lotId, ids.getFirst());
+    private void saveVarieties(UUID lotId, List<String> values) {
+        if (values == null) return;
+        for (String value : values.stream().filter(v -> v != null && !v.isBlank()).distinct().toList()) {
+            List<UUID> ids = jdbc.query("select id from variety where active = true and (lower(name) = lower(?) or lower(code) = lower(?))",
+                (rs, index) -> rs.getObject(1, UUID.class), value.trim(), value.trim());
+            if (ids.isEmpty()) throw new NotFoundException("Variedad no encontrada en el catálogo: " + value);
+            jdbc.update("insert into lot_variety(id, lot_id, variety_id) values (?, ?, ?)", UUID.randomUUID(), lotId, ids.getFirst());
+        }
     }
 
     private UUID responsibleId(String value, UUID centerId) {
@@ -183,7 +186,7 @@ public class LotService {
             row.category() == null ? "Unclassified" : row.category(),
             row.destination() == null ? "Pending" : row.destination(),
             row.responsible(), row.responsibleUsername(), row.entryDate(), row.origin() == null ? "" : row.origin(),
-            String.join(", ", varieties.get(row.id())), row.archived(), content.get(row.id())));
+            String.join(", ", varieties.get(row.id())), varieties.get(row.id()), row.archived(), content.get(row.id())));
         return result;
     }
 

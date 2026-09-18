@@ -13,6 +13,7 @@ public record LotResponse(
     LocalDate entryDate,
     String origin,
     String variety,
+    List<String> varieties,
     boolean archived,
     List<String> contentCodes
 ) {}
