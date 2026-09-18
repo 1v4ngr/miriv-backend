@@ -154,9 +154,13 @@ public class LaboratoryService {
     public SampleResponse validate(String code, String note) {
         SampleRow sample = findForUpdate(code);
         if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Invalidated analysis cannot be validated.");
+        if (sample.status().equals("DRAFT") || sample.status().equals("PARTIAL")) throw new BusinessRuleException("Análisis en borrador: complétalo antes de validarlo.");
         int required = required(sample.panelId());
         int completedRequired = completedRequired(sample.analysisId(), sample.panelId());
-        if (completedRequired < required) throw new BusinessRuleException("Mandatory parameters are missing.");
+        if (completedRequired < required) {
+            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
+                "Mandatory parameters are missing: " + (required - completedRequired) + " pendiente(s).");
+        }
         UUID actor = actorId();
         jdbc.update("update analysis set status = 'VALIDATED'::analysis_status, validated_at = now(), "
                 + "validated_by_id = ?, validation_note = ? where id = ?", actor, blankToNull(note), sample.analysisId());
@@ -176,9 +180,9 @@ public class LaboratoryService {
         if (current.isEmpty()) throw new NotFoundException("Current result not found.");
         UUID prior = current.getFirst();
         jdbc.update("update result set is_current = false where id = ?", prior);
-        jdbc.update("insert into result(id, analysis_id, parameter_id, qualifier, numeric_value, original_value, "
-                + "original_unit, equipment, supersedes_result_id, correction_reason, created_by_id) "
-                + "select ?, analysis_id, parameter_id, 'NONE'::result_qualifier, ?, ?, original_unit, equipment, id, ?, ? "
+        jdbc.update("insert into result(id, analysis_id, parameter_id, qualifier, numeric_value, qualifier_limit, "
+                + "original_value, original_unit, equipment, supersedes_result_id, correction_reason, created_by_id) "
+                + "select ?, analysis_id, parameter_id, qualifier, ?, qualifier_limit, ?, original_unit, equipment, id, ?, ? "
                 + "from result where id = ?", UUID.randomUUID(), decimal(request.value()), request.value(),
             request.reason().trim(), actorId(), prior);
         jdbc.update("update analysis set status = 'PENDING_VALIDATION'::analysis_status, validated_at = null, "
@@ -189,6 +193,8 @@ public class LaboratoryService {
     @Transactional
     public SampleResponse invalidate(String code, String reason) {
         SampleRow sample = findForUpdate(code);
+        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Análisis ya invalidado.");
+        if (sample.status().equals("VALIDATED")) throw new BusinessRuleException("Un análisis validado debe corregirse primero, no invalidarse.");
         jdbc.update("update analysis set status = 'INVALIDATED'::analysis_status, validation_note = ?, "
             + "validated_at = null, validated_by_id = null where id = ?", reason.trim(), sample.analysisId());
         jdbc.update("update result set validated = false, validated_at = null, validated_by_id = null "
@@ -222,7 +228,7 @@ public class LaboratoryService {
         String age = days == 0 ? "today" : days == 1 ? "yesterday" : days + " days ago";
         return new SampleResponse(row.code(), row.originDeposit(), currentDeposit, row.contentCode(), row.lotCode(),
             row.category() == null ? "" : row.category(), row.takenAt().atZone(timezone).toLocalDateTime().toString(),
-            takenDate, age, panelName(row.panelCode()), results.size(), required(row.panelId()), status,
+            takenDate, age, panelName(row.panelCode()), completedRequired(row.analysisId(), row.panelId()), required(row.panelId()), status,
             row.responsible(), false, panelParameters, results, row.observations(),
             row.processedAt() == null ? null : row.processedAt().atZone(timezone).toLocalDate(),
             row.laboratory(), row.equipment(), row.method(), row.validationNote());
