@@ -8,6 +8,7 @@ import coop.miriv.enology.identity.dto.UpdateProfileRequest;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -44,8 +45,11 @@ public class CurrentUserProfileService {
 
     @Transactional(readOnly = true)
     public List<CenterOption> listCenters() {
-        return jdbc.query("select code, name from center order by name",
-            (rs, row) -> new CenterOption(rs.getString("code"), rs.getString("name")));
+        UUID userId = currentUser.requireCurrentUserId();
+        return jdbc.query("select c.code, c.name from center c "
+                + "join app_user_center uc on uc.center_id = c.id "
+                + "where uc.user_id = ? order by c.name",
+            (rs, row) -> new CenterOption(rs.getString("code"), rs.getString("name")), userId);
     }
 
     @Transactional(readOnly = true)
@@ -79,9 +83,11 @@ public class CurrentUserProfileService {
         if (updated == 0) throw new NotFoundException("Current user profile not found.");
 
         if (StringUtils.hasText(request.centerCode())) {
-            List<UUID> centerIds = jdbc.query("select id from center where code = ?",
-                (rs, row) -> rs.getObject(1, UUID.class), request.centerCode().trim());
-            if (centerIds.isEmpty()) throw new NotFoundException("Unknown center code: " + request.centerCode());
+            List<UUID> centerIds = jdbc.query("select c.id from center c "
+                    + "join app_user_center uc on uc.center_id = c.id "
+                    + "where uc.user_id = ? and c.code = ?",
+                (rs, row) -> rs.getObject(1, UUID.class), userId, request.centerCode().trim());
+            if (centerIds.isEmpty()) throw new AccessDeniedException("No perteneces a ese centro.");
             jdbc.update("update app_user set center_id = ? where id = ?", centerIds.getFirst(), userId);
         }
 
