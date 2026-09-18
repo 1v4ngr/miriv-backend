@@ -72,11 +72,18 @@ public class LotService {
               join content_unit child on child.id = ml.destination_content_unit_id
               join lot l on l.id = child.lot_id
              where child.lot_id = ? and ml.source_content_unit_id is null
+            union all
+            select parent.code as origin, 'Salida / merma' as destination, m.effective_at, m.code as movement,
+                   ml.volume_liters, m.type::text as note
+              from movement_line ml
+              join movement m on m.id = ml.movement_id
+              join content_unit parent on parent.id = ml.source_content_unit_id
+             where parent.lot_id = ? and ml.destination_content_unit_id is null
              order by effective_at
             """, (rs, index) -> new LineageEventResponse(rs.getString("origin"),
             rs.getString("destination"), rs.getTimestamp("effective_at").toInstant(),
             rs.getString("movement"), rs.getBigDecimal("volume_liters"), rs.getString("note")),
-            lot.id(), lot.id(), lot.id());
+            lot.id(), lot.id(), lot.id(), lot.id());
     }
 
     @Transactional
@@ -126,13 +133,27 @@ public class LotService {
         return get(code);
     }
 
+    @Transactional
+    public LotResponse reopen(String code, String reason) {
+        UUID centerId = context.centerId();
+        LotRow lot = find(code, centerId);
+        if (!lot.archived()) {
+            throw new BusinessRuleException("El lote no está archivado.");
+        }
+        jdbc.update("update lot set archived = false, reopened_at = now(), reopened_reason = ? where id = ?",
+            reason == null || reason.isBlank() ? null : reason.trim(), lot.id());
+        return get(code);
+    }
+
     private void createEntry(UUID lotId, String lotCode, int campaign, UUID categoryId,
                              UUID responsibleId, UUID centerId, LotEntryRequest entry) {
-        List<DepositSlot> slots = jdbc.query("select id, status::text, useful_capacity_liters from deposit where center_id = ? and code = ? and active = true for update",
-            (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")),
+        List<DepositSlot> slots = jdbc.query("select id, zone_id, status::text, useful_capacity_liters from deposit where center_id = ? and code = ? and active = true for update",
+            (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getObject("zone_id", UUID.class),
+                rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")),
             centerId, normalize(entry.depositCode()));
         if (slots.isEmpty()) throw new NotFoundException("Deposit not found in the current center.");
         DepositSlot slot = slots.getFirst();
+        context.requireInZone("LOT_MANAGE", slot.zoneId());
         if (!slot.status().equals("AVAILABLE")) throw new BusinessRuleException("The deposit is not available for entry.");
         if (entry.volumeLiters().compareTo(slot.capacity()) > 0) throw new BusinessRuleException("Entry volume exceeds useful capacity.");
         Instant effectiveAt = entry.effectiveDate().atStartOfDay(timezone).toInstant();
@@ -225,5 +246,5 @@ public class LotService {
 
     private record LotRow(UUID id, String code, int campaign, String category, String destination,
                           String responsible, String responsibleUsername, java.time.LocalDate entryDate, String origin, boolean archived) {}
-    private record DepositSlot(UUID id, String status, java.math.BigDecimal capacity) {}
+    private record DepositSlot(UUID id, UUID zoneId, String status, java.math.BigDecimal capacity) {}
 }

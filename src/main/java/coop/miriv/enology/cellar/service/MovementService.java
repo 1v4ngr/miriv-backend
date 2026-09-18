@@ -49,14 +49,18 @@ public class MovementService {
         String destinationCode = exit ? null : normalize(request.destinationDeposit());
         if (sourceCode.equals(destinationCode)) throw new BusinessRuleException("Source and destination must differ.");
         List<DepositSlot> locked = jdbc.query(
-            "select id, code, status::text, useful_capacity_liters from deposit "
+            "select id, code, zone_id, status::text, useful_capacity_liters from deposit "
                 + "where center_id = ? and active = true and (code = ? or code = ?) order by id for update",
             (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getString("code"),
-                rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")), centerId, sourceCode, destinationCode);
+                rs.getObject("zone_id", UUID.class), rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")), centerId, sourceCode, destinationCode);
         DepositSlot source = locked.stream().filter(item -> item.code().equals(sourceCode)).findFirst()
             .orElseThrow(() -> new NotFoundException("Source deposit not found."));
+        context.requireInZone("MOVEMENT_REGISTER", source.zoneId());
         DepositSlot destination = exit ? null : locked.stream().filter(item -> item.code().equals(destinationCode)).findFirst()
             .orElseThrow(() -> new NotFoundException("Destination deposit not found."));
+        if (destination != null) {
+            context.requireInZone("MOVEMENT_REGISTER", destination.zoneId());
+        }
         if (destination != null && !destination.status().equals("AVAILABLE") && !destination.status().equals("OCCUPIED")) {
             throw new BusinessRuleException("Destination deposit cannot receive product in its current state.");
         }
@@ -77,6 +81,9 @@ public class MovementService {
         }
         if (destinationUnit != null && !request.authorizeMixture()) {
             throw new BusinessRuleException("An occupied destination requires explicit mixture authorization.");
+        }
+        if (destinationUnit != null && request.authorizeMixture()) {
+            context.requireInZone("MIXTURE_AUTHORIZE", destination.zoneId());
         }
         if (destinationUnit != null && effectiveAt.isBefore(destinationUnit.startedAt())) {
             throw new BusinessRuleException("Effective time precedes the destination occupation.");
@@ -168,13 +175,14 @@ public class MovementService {
     public void clearOccupation(String depositCode, String reason, String responsible) {
         UUID centerId = context.centerId();
         DepositSlot source = jdbc.query(
-                "select id, code, status::text, useful_capacity_liters from deposit "
+                "select id, code, zone_id, status::text, useful_capacity_liters from deposit "
                     + "where center_id = ? and active = true and lower(code) = lower(?) for update",
                 (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getString("code"),
-                    rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")),
+                    rs.getObject("zone_id", UUID.class), rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")),
                 centerId, depositCode == null ? "" : depositCode.trim())
             .stream().findFirst()
             .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
+        context.requireInZone("CONTENT_CORRECT", source.zoneId());
         if (!source.status().equals("OCCUPIED") && !source.status().equals("PENDING_CLEANING")) {
             throw new BusinessRuleException("El depósito no tiene contenido activo que retirar.");
         }
@@ -190,6 +198,8 @@ public class MovementService {
         jdbc.update("insert into movement(id, code, type, status, effective_at, responsible_id, reason) "
                 + "values (?, ?, 'LOSS'::movement_type, 'EXECUTED'::movement_status, ?, ?, ?)",
             movementId, movementCode, Timestamp.from(effectiveAt), responsiblePk, trimmedReason);
+        jdbc.update("insert into movement_line(id, movement_id, source_content_unit_id, source_deposit_id, volume_liters) "
+                + "values (?, ?, ?, ?, ?)", UUID.randomUUID(), movementId, sourceUnit.contentId(), source.id(), sourceUnit.volume());
         jdbc.update("update occupation set end_at = ?, volume_liters = 0 where id = ?", Timestamp.from(effectiveAt), sourceUnit.occupationId());
         jdbc.update("update content_unit set volume_liters = 0, active = false where id = ?", sourceUnit.contentId());
         jdbc.update("update deposit set status = 'PENDING_CLEANING'::deposit_status, updated_at = now() where id = ?", source.id());
@@ -229,7 +239,7 @@ public class MovementService {
 
     private String normalize(String value) { return value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }
 
-    private record DepositSlot(UUID id, String code, String status, BigDecimal capacity) {}
+    private record DepositSlot(UUID id, String code, UUID zoneId, String status, BigDecimal capacity) {}
     private record OccupiedUnit(UUID occupationId, UUID contentId, String contentCode, String lotCode,
                                 BigDecimal volume, Instant startedAt) {}
 }
