@@ -33,9 +33,12 @@ public class IncidentService {
 
     @Transactional(readOnly = true)
     public List<IncidentResponse> list() {
-        return jdbc.query(INCIDENT_SELECT + " where coalesce(d.center_id, l.center_id) = ? "
-                + "order by case i.priority when 'URGENT' then 0 when 'HIGH' then 1 else 2 end, i.opened_at desc",
-            (rs, index) -> response(rs), context.centerId());
+        coop.miriv.enology.identity.service.CurrentUserContext.ZoneFilter filter = context.readZoneFilter("d");
+        String filterSql = filter.allZones() ? "" : " and (d.zone_id is null or d.zone_id in ("
+            + (filter.zoneIds().isEmpty() ? "select null::uuid where false" : String.join(",", filter.zoneIds().stream().map(id -> "?").toList())) + "))";
+        return jdbc.query(INCIDENT_SELECT + " where coalesce(d.center_id, l.center_id) = ?"
+                + filterSql + " order by case i.priority when 'URGENT' then 0 when 'HIGH' then 1 else 2 end, i.opened_at desc",
+            (rs, index) -> response(rs), prependZoneFilter());
     }
 
     @Transactional(readOnly = true)
@@ -149,6 +152,14 @@ public class IncidentService {
     }
 
     private String normalize(String code) { return code.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }
+
+    private Object[] prependZoneFilter() {
+        java.util.List<Object> params = new java.util.ArrayList<>();
+        params.add(context.centerId());
+        coop.miriv.enology.identity.service.CurrentUserContext.ZoneFilter filter = context.readZoneFilter("d");
+        if (!filter.allZones() && !filter.zoneIds().isEmpty()) params.addAll(filter.zoneIds());
+        return params.toArray();
+    }
 
     private static final String INCIDENT_SELECT = "select i.id, i.code, i.title, d.code as deposit_code, "
         + "cu.code as content_code, i.priority::text, i.status::text, u.full_name as responsible, "

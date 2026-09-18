@@ -12,9 +12,7 @@ import coop.miriv.enology.cellar.repository.DepositRepository;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
 import coop.miriv.enology.identity.entity.Center;
-import coop.miriv.enology.identity.entity.RoleCode;
 import coop.miriv.enology.identity.entity.Zone;
 import coop.miriv.enology.identity.repository.ZoneRepository;
 import coop.miriv.enology.identity.service.CurrentUserContext;
@@ -23,7 +21,6 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -32,9 +29,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 @Service
 public class DepositService {
-
-    private static final Set<RoleCode> MANAGEMENT_ROLES = Set.of(
-        RoleCode.ENOLOGIST, RoleCode.PRODUCTION_MANAGER, RoleCode.ADMIN);
 
     private final DepositRepository deposits;
     private final DepositReadRepository readRepository;
@@ -53,24 +47,22 @@ public class DepositService {
 
     @Transactional(readOnly = true)
     public List<DepositResponse> list() {
-        AppUser user = context.user();
         UUID centerId = context.centerId();
         Map<UUID, List<OccupationResponse>> occupations = readRepository.occupationsByCenter(centerId);
         Map<UUID, List<CleaningRecordResponse>> cleaning = readRepository.cleaningByCenter(centerId);
         return deposits.findAllByCenter_IdOrderByCodeAsc(centerId).stream()
             .filter(Deposit::isActive)
-            .filter(deposit -> canReadZone(user, deposit.getZone()))
+            .filter(deposit -> context.canRead(deposit.getZone() == null ? null : deposit.getZone().getId()))
             .map(deposit -> response(deposit, occupations, cleaning))
             .toList();
     }
 
     @Transactional(readOnly = true)
     public DepositResponse get(String code) {
-        AppUser user = context.user();
         UUID centerId = context.centerId();
         Deposit deposit = deposits.findByCenter_IdAndCodeIgnoreCase(centerId, normalize(code))
             .filter(Deposit::isActive)
-            .filter(item -> canReadZone(user, item.getZone()))
+            .filter(item -> context.canRead(item.getZone() == null ? null : item.getZone().getId()))
             .orElseThrow(() -> new NotFoundException("Deposit not found."));
         return response(deposit, readRepository.occupationsByCenter(centerId),
             readRepository.cleaningByCenter(centerId));
@@ -78,14 +70,13 @@ public class DepositService {
 
     @Transactional
     public DepositResponse create(DepositRequest request) {
-        AppUser user = context.user();
         Center center = context.center();
         if (!request.center().equalsIgnoreCase(center.getCode())
             && !request.center().equalsIgnoreCase(center.getName())) {
             throw new AccessDeniedException("The requested center is outside your scope.");
         }
         Zone zone = resolveZone(center.getId(), request.zone());
-        requireManagementZone(user, zone);
+        context.requireInZone("DEPOSIT_MANAGE", zone.getId());
         String code = normalize(request.code());
         if (deposits.existsByCenter_IdAndCodeIgnoreCase(center.getId(), code)) {
             throw new ConflictException("A deposit with this code already exists in the center.");
@@ -105,14 +96,13 @@ public class DepositService {
 
     @Transactional
     public DepositResponse update(String code, UpdateDepositRequest request) {
-        AppUser user = context.user();
         Center center = context.center();
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
             .orElseThrow(() -> new NotFoundException("Deposit not found."));
-        requireManagementZone(user, deposit.getZone());
+        context.requireInZone("DEPOSIT_MANAGE", deposit.getZone().getId());
         Zone zone = resolveZone(center.getId(), request.zone());
-        requireManagementZone(user, zone);
+        context.requireInZone("DEPOSIT_MANAGE", zone.getId());
         BigDecimal occupied = readRepository.activeVolume(deposit.getId());
         if (request.capacityLiters().compareTo(occupied) < 0) {
             throw new BusinessRuleException("Useful capacity cannot be lower than occupied volume.");
@@ -130,12 +120,11 @@ public class DepositService {
 
     @Transactional
     public DepositResponse deactivate(String code) {
-        AppUser user = context.user();
         Center center = context.center();
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
             .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
-        requireManagementZone(user, deposit.getZone());
+        context.requireInZone("DEPOSIT_MANAGE", deposit.getZone().getId());
         if (readRepository.activeVolume(deposit.getId()).signum() > 0) {
             throw new BusinessRuleException("No se puede desactivar un depósito con contenido.");
         }
@@ -162,20 +151,6 @@ public class DepositService {
         return zones.findByCenter_IdAndCodeIgnoreCase(centerId, value.trim())
             .or(() -> zones.findByCenter_IdAndNameIgnoreCase(centerId, value.trim()))
             .orElseThrow(() -> new NotFoundException("Zone not found in the current center."));
-    }
-
-    private boolean canReadZone(AppUser user, Zone zone) {
-        return user.getRoles().stream().anyMatch(assignment -> assignment.getZone() == null
-            || zone != null && assignment.getZone().getId().equals(zone.getId()));
-    }
-
-    private void requireManagementZone(AppUser user, Zone zone) {
-        boolean allowed = user.getRoles().stream().anyMatch(assignment ->
-            MANAGEMENT_ROLES.contains(assignment.getRole().getCode())
-                && (assignment.getZone() == null || assignment.getZone().getId().equals(zone.getId())));
-        if (!allowed) {
-            throw new AccessDeniedException("You cannot manage deposits in this zone.");
-        }
     }
 
     private String normalize(String code) {

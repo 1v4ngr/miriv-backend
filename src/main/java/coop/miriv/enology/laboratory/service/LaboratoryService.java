@@ -55,8 +55,8 @@ public class LaboratoryService {
 
     @Transactional(readOnly = true)
     public List<SampleResponse> list() {
-        List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ? order by s.taken_at desc",
-            (rs, index) -> sampleRow(rs), context.centerId());
+        List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ?" + context.readZoneFilter("d").sql() + " order by s.taken_at desc",
+            (rs, index) -> sampleRow(rs), prependZoneFilter(context.centerId(), context.readZoneFilter("d")));
         return rows.stream().map(this::response).toList();
     }
 
@@ -95,6 +95,8 @@ public class LaboratoryService {
         }
         UUID depositId = jdbc.queryForObject("select id from deposit where center_id = ? and code = ?", UUID.class,
             centerId, normalize(request.originDeposit()));
+        UUID originZoneId = jdbc.queryForObject("select zone_id from deposit where id = ?", UUID.class, depositId);
+        context.requireInZone("SAMPLE_REGISTER", originZoneId);
         UUID responsibleId = userId(request.responsible(), centerId);
         UUID panelId = panelId(request.panel());
         UUID sampleId = UUID.randomUUID();
@@ -261,8 +263,8 @@ public class LaboratoryService {
     }
 
     private SampleRow find(String code, UUID centerId) {
-        List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ? and s.code = ?",
-            (rs, index) -> sampleRow(rs), centerId, normalize(code));
+        List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ? and s.code = ?" + context.readZoneFilter("d").sql(),
+            (rs, index) -> sampleRow(rs), prependZoneFilter(centerId, context.readZoneFilter("d")), normalize(code));
         if (rows.isEmpty()) throw new NotFoundException("Sample not found.");
         return rows.getFirst();
     }
@@ -345,6 +347,13 @@ public class LaboratoryService {
     }
 
     private UUID actorId() { return context.userId(); }
+
+    private static Object[] prependZoneFilter(UUID centerId, CurrentUserContext.ZoneFilter filter) {
+        java.util.List<Object> params = new java.util.ArrayList<>();
+        params.add(centerId);
+        params.addAll(filter.zoneIds());
+        return params.toArray();
+    }
 
     private BigDecimal decimal(String raw) {
         if (raw == null || raw.isBlank()) throw new BusinessRuleException("Numeric value or limit is required.");

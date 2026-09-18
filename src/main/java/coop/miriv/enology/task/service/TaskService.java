@@ -35,8 +35,9 @@ public class TaskService {
 
     @Transactional(readOnly = true)
     public List<TaskResponse> list() {
-        return jdbc.query(TASK_SELECT + " where d.center_id = ? order by t.due_at nulls last, t.created_at desc",
-            (rs, index) -> response(rs), context.centerId());
+        return jdbc.query(TASK_SELECT + " where d.center_id = ?" + context.readZoneFilter("d").sql()
+                + " order by t.due_at nulls last, t.created_at desc",
+            (rs, index) -> response(rs), prependZoneFilter(context.centerId(), context.readZoneFilter("d")));
     }
 
     @Transactional(readOnly = true)
@@ -49,6 +50,7 @@ public class TaskService {
         UUID centerId = context.centerId();
         if (!PRIORITIES.contains(request.priority())) throw new BusinessRuleException("Unsupported task priority.");
         UUID depositId = depositId(request.depositCode(), centerId);
+        context.requireInZone("TASK_CREATE", depositZone(depositId));
         UUID contentId = contentId(request.contentCode(), centerId);
         if (contentId != null) requireCurrentLocation(contentId, depositId);
         UUID responsibleId = responsibleId(request.responsible(), centerId);
@@ -152,6 +154,17 @@ public class TaskService {
             (rs, index) -> rs.getObject(1, UUID.class), centerId, normalize(code));
         if (ids.isEmpty()) throw new NotFoundException("Deposit not found.");
         return ids.getFirst();
+    }
+
+    private UUID depositZone(UUID depositId) {
+        return jdbc.queryForObject("select zone_id from deposit where id = ?", UUID.class, depositId);
+    }
+
+    private static Object[] prependZoneFilter(UUID centerId, coop.miriv.enology.identity.service.CurrentUserContext.ZoneFilter filter) {
+        java.util.List<Object> params = new java.util.ArrayList<>();
+        params.add(centerId);
+        params.addAll(filter.zoneIds());
+        return params.toArray();
     }
 
     private UUID contentId(String code, UUID centerId) {

@@ -35,17 +35,27 @@ public class WorkHomeService {
     public WorkHomeResponse get() {
         AppUser user = context.user();
         UUID centerId = context.centerId();
+        coop.miriv.enology.identity.service.CurrentUserContext.ZoneFilter depositFilter = context.readZoneFilter("d");
+        String depositZoneSql = depositFilter.allZones() ? "" : " and (d.zone_id is null or d.zone_id in ("
+            + (depositFilter.zoneIds().isEmpty() ? "select null::uuid where false"
+                : String.join(",", depositFilter.zoneIds().stream().map(id -> "?").toList())) + "))";
+        Object[] depositZoneParams = depositFilter.allZones() || depositFilter.zoneIds().isEmpty()
+            ? new Object[]{centerId} : prepend(centerId, depositFilter.zoneIds());
         int urgent = count("select count(*) from incident i join deposit d on d.id = i.deposit_id "
-            + "where d.center_id = ? and i.priority = 'URGENT'::alert_priority "
-            + "and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status)", centerId);
+            + "where d.center_id = ?" + depositZoneSql
+            + " and i.priority = 'URGENT'::alert_priority "
+            + "and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status)", depositZoneParams);
         int attention = count("select count(*) from incident i join deposit d on d.id = i.deposit_id "
-            + "where d.center_id = ? and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status)", centerId);
+            + "where d.center_id = ?" + depositZoneSql
+            + " and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status)", depositZoneParams);
         int overdue = count("select count(*) from task t join deposit d on d.id = t.deposit_id "
-            + "where d.center_id = ? and t.due_at < now() "
-            + "and t.status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status)", centerId);
+            + "where d.center_id = ?" + depositZoneSql
+            + " and t.due_at < now() "
+            + "and t.status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status)", depositZoneParams);
         int pendingValidation = count("select count(*) from analysis a join sample s on s.id = a.sample_id "
             + "join deposit d on d.id = s.deposit_id_at_sampling "
-            + "where d.center_id = ? and a.status = 'PENDING_VALIDATION'::analysis_status", centerId);
+            + "where d.center_id = ?" + depositZoneSql
+            + " and a.status = 'PENDING_VALIDATION'::analysis_status", depositZoneParams);
         int ownTaskCount = jdbc.queryForObject("select count(*) from task where responsible_id = ? "
                 + "and status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status)", Integer.class, user.getId());
         List<DashboardMetric> metrics = List.of(
@@ -58,7 +68,8 @@ public class WorkHomeService {
                 + "left join content_unit cu on cu.id = i.content_unit_id "
                 + "left join lot l on l.id = cu.lot_id "
                 + "left join internal_category cat on cat.id = cu.category_id "
-                + "where d.center_id = ? and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status) "
+                + "where d.center_id = ?" + depositZoneSql
+                + " and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status) "
                 + "order by case i.priority when 'URGENT' then 0 when 'HIGH' then 1 else 2 end, i.opened_at limit 20",
             (rs, index) -> {
                 String priority = rs.getString("priority");
@@ -67,7 +78,7 @@ public class WorkHomeService {
                     rs.getString("category"), rs.getString("lot_code"), rs.getString("title"),
                     null, null, "Open incident", rs.getTimestamp("opened_at").toInstant().toString(),
                     "View evidence");
-            }, centerId);
+            }, depositZoneParams);
         List<RecentActivity> activity = jdbc.query("select m.effective_at, m.code, m.type::text as type "
                 + "from movement m join movement_line ml on ml.movement_id = m.id "
                 + "left join deposit source on source.id = ml.source_deposit_id "
@@ -83,5 +94,12 @@ public class WorkHomeService {
             metrics, items, new OwnTasks("available", ownTaskCount, ownTaskCount + " open tasks"), activity);
     }
 
-    private int count(String sql, UUID centerId) { return jdbc.queryForObject(sql, Integer.class, centerId); }
+    private int count(String sql, Object... params) { return jdbc.queryForObject(sql, Integer.class, params); }
+
+    private static Object[] prepend(UUID centerId, java.util.List<?> extras) {
+        java.util.List<Object> params = new java.util.ArrayList<>();
+        params.add(centerId);
+        params.addAll(extras);
+        return params.toArray();
+    }
 }

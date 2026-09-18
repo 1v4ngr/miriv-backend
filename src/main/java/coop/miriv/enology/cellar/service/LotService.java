@@ -6,6 +6,7 @@ import coop.miriv.enology.cellar.dto.LotRequest;
 import coop.miriv.enology.cellar.dto.LotResponse;
 import coop.miriv.enology.cellar.dto.LineageEventResponse;
 import coop.miriv.enology.cellar.dto.UpdateLotRequest;
+import coop.miriv.enology.common.CodeGenerator;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
@@ -32,12 +33,14 @@ public class LotService {
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
     private final ZoneId timezone;
+    private final CodeGenerator codes;
 
     public LotService(JdbcTemplate jdbc, CurrentUserContext context,
-                       @Value("${app.timezone}") String timezone) {
+                       @Value("${app.timezone}") String timezone, CodeGenerator codes) {
         this.jdbc = jdbc;
         this.context = context;
         this.timezone = ZoneId.of(timezone);
+        this.codes = codes;
     }
 
     @Transactional(readOnly = true)
@@ -92,7 +95,7 @@ public class LotService {
         LotRequest lot = request.lot();
         String code = normalize(lot.code());
         if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from lot where code = ?)", Boolean.class, code))) {
-            throw new ConflictException("A lot with this code already exists.");
+            throw new ConflictException("DUPLICATE_CODE", "Ya existe un lote con ese código.");
         }
         UUID categoryId = catalogId("internal_category", lot.category());
         UUID destinationId = catalogId("destination", lot.destination());
@@ -151,18 +154,21 @@ public class LotService {
             (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getObject("zone_id", UUID.class),
                 rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")),
             centerId, normalize(entry.depositCode()));
-        if (slots.isEmpty()) throw new NotFoundException("Deposit not found in the current center.");
+        if (slots.isEmpty()) throw new NotFoundException("Depósito no encontrado en el centro actual.");
         DepositSlot slot = slots.getFirst();
         context.requireInZone("LOT_MANAGE", slot.zoneId());
-        if (!slot.status().equals("AVAILABLE")) throw new BusinessRuleException("The deposit is not available for entry.");
-        if (entry.volumeLiters().compareTo(slot.capacity()) > 0) throw new BusinessRuleException("Entry volume exceeds useful capacity.");
+        if (!slot.status().equals("AVAILABLE")) throw new BusinessRuleException("El depósito no está disponible para entrada.");
+        if (entry.volumeLiters().compareTo(slot.capacity()) > 0) {
+            throw new BusinessRuleException("CAPACITY_EXCEEDED",
+                "El volumen de entrada supera la capacidad útil del depósito.");
+        }
         Instant effectiveAt = entry.effectiveDate().atStartOfDay(timezone).toInstant();
         UUID movementId = UUID.randomUUID();
-        String movementCode = "MOV-" + campaign + "-" + movementId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        String movementCode = codes.next("MOV", campaign);
         jdbc.update("insert into movement(id, code, type, status, effective_at, responsible_id, reason) values (?, ?, 'ENTRY'::movement_type, 'EXECUTED'::movement_status, ?, ?, ?)",
-            movementId, movementCode, Timestamp.from(effectiveAt), responsibleId, "Initial lot entry " + lotCode);
+            movementId, movementCode, Timestamp.from(effectiveAt), responsibleId, "Entrada inicial del lote " + lotCode);
         UUID contentId = UUID.randomUUID();
-        String contentCode = "C-" + campaign + "-" + contentId.toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        String contentCode = codes.next("C", campaign);
         jdbc.update("insert into content_unit(id, code, lot_id, category_id, volume_liters) values (?, ?, ?, ?, ?)",
             contentId, contentCode, lotId, categoryId, entry.volumeLiters());
         jdbc.update("insert into occupation(id, content_unit_id, deposit_id, start_at, volume_liters) values (?, ?, ?, ?, ?)",
@@ -176,7 +182,7 @@ public class LotService {
         // The table name is selected by callers from two fixed, internal catalog names.
         List<UUID> ids = jdbc.query("select id from " + table + " where active = true and (lower(name) = lower(?) or lower(code) = lower(?))",
             (rs, index) -> rs.getObject(1, UUID.class), value.trim(), value.trim());
-        if (ids.isEmpty()) throw new NotFoundException("Catalog value not found: " + value);
+        if (ids.isEmpty()) throw new NotFoundException("Valor de catálogo no encontrado: " + value);
         return ids.getFirst();
     }
 
@@ -201,30 +207,65 @@ public class LotService {
     private LotRow find(String code, UUID centerId) {
         List<LotRow> rows = jdbc.query(LOT_SELECT + " where l.center_id = ? and l.code = ?",
             (rs, index) -> row(rs), centerId, normalize(code));
-        if (rows.isEmpty()) throw new NotFoundException("Lot not found.");
+        if (rows.isEmpty()) throw new NotFoundException("Lote no encontrado.");
         return rows.getFirst();
     }
 
+    /**
+     * F2-07: replaces the per-row N+1 enrich with a small batched read.
+     * Returns the same shape of {@link LotResponse} list, in the same order as the input.
+     */
     private List<LotResponse> enrich(List<LotRow> rows) {
         if (rows.isEmpty()) return List.of();
+        List<UUID> lotIds = rows.stream().map(LotRow::id).toList();
         Map<UUID, List<String>> content = new HashMap<>();
         Map<UUID, List<String>> activeContent = new HashMap<>();
         Map<UUID, List<String>> varieties = new HashMap<>();
-        for (LotRow row : rows) {
-            List<String> allCodes = jdbc.query("select code from content_unit where lot_id = ? order by created_at",
-                (rs, index) -> rs.getString(1), row.id());
-            content.put(row.id(), allCodes);
-            activeContent.put(row.id(), jdbc.query("select code from content_unit where lot_id = ? and active = true order by created_at",
-                (rs, index) -> rs.getString(1), row.id()));
-            varieties.put(row.id(), jdbc.query("select v.name from lot_variety lv join variety v on v.id = lv.variety_id where lv.lot_id = ? order by v.name",
-                (rs, index) -> rs.getString(1), row.id()));
-        }
+
+        jdbc.query("""
+            select lot_id, code, active
+              from content_unit
+             where lot_id = any(?)
+             order by lot_id, created_at
+            """,
+            ps -> {
+                java.sql.Array arr = ps.getConnection().createArrayOf("uuid", lotIds.toArray());
+                ps.setArray(1, arr);
+            },
+            (rs, index) -> {
+                UUID lotId = rs.getObject("lot_id", UUID.class);
+                String code = rs.getString("code");
+                content.computeIfAbsent(lotId, k -> new ArrayList<>()).add(code);
+                if (rs.getBoolean("active")) {
+                    activeContent.computeIfAbsent(lotId, k -> new ArrayList<>()).add(code);
+                }
+                return null;
+            });
+
+        jdbc.query("""
+            select lv.lot_id, v.name
+              from lot_variety lv join variety v on v.id = lv.variety_id
+             where lv.lot_id = any(?)
+             order by lv.lot_id, v.name
+            """,
+            ps -> {
+                java.sql.Array arr = ps.getConnection().createArrayOf("uuid", lotIds.toArray());
+                ps.setArray(1, arr);
+            },
+            (rs, index) -> {
+                UUID lotId = rs.getObject("lot_id", UUID.class);
+                varieties.computeIfAbsent(lotId, k -> new ArrayList<>()).add(rs.getString("name"));
+                return null;
+            });
+
         List<LotResponse> result = new ArrayList<>();
         for (LotRow row : rows) result.add(new LotResponse(row.code(), row.campaign(),
-            row.category() == null ? "Unclassified" : row.category(),
-            row.destination() == null ? "Pending" : row.destination(),
+            row.category(), row.destination(),
             row.responsible(), row.responsibleUsername(), row.entryDate(), row.origin() == null ? "" : row.origin(),
-            String.join(", ", varieties.get(row.id())), varieties.get(row.id()), row.archived(), content.get(row.id()), activeContent.get(row.id())));
+            String.join(", ", varieties.getOrDefault(row.id(), List.of())),
+            varieties.getOrDefault(row.id(), List.of()),
+            row.archived(), content.getOrDefault(row.id(), List.of()),
+            activeContent.getOrDefault(row.id(), List.of())));
         return result;
     }
 

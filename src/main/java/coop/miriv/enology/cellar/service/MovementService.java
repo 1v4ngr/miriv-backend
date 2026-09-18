@@ -2,8 +2,11 @@ package coop.miriv.enology.cellar.service;
 
 import coop.miriv.enology.cellar.dto.MovementRequest;
 import coop.miriv.enology.cellar.dto.MovementResponse;
+import coop.miriv.enology.common.CodeGenerator;
 import coop.miriv.enology.common.exception.BusinessRuleException;
+import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
+import coop.miriv.enology.common.exception.StaleBalanceException;
 import coop.miriv.enology.identity.service.CurrentUserContext;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
@@ -40,63 +43,91 @@ public class MovementService {
         UUID centerId = context.centerId();
         boolean exit = request.type().equalsIgnoreCase("Salida");
         if (!exit && !request.type().equalsIgnoreCase("Trasiego") && !request.type().equalsIgnoreCase("Trasvase")) {
-            throw new BusinessRuleException("Unsupported movement type.");
+            throw new BusinessRuleException("Tipo de movimiento no soportado.");
         }
         if (!exit && (request.destinationDeposit() == null || request.destinationDeposit().isBlank())) {
-            throw new BusinessRuleException("Destination deposit is required.");
+            throw new BusinessRuleException("El depósito de destino es obligatorio.");
         }
         String sourceCode = normalize(request.sourceDeposit());
         String destinationCode = exit ? null : normalize(request.destinationDeposit());
-        if (sourceCode.equals(destinationCode)) throw new BusinessRuleException("Source and destination must differ.");
+        if (sourceCode.equals(destinationCode)) throw new BusinessRuleException("El origen y el destino deben ser distintos.");
+
+        // F2-04 idempotency: a repeated confirmation with the same key must NOT duplicate
+        // the movement. It returns the original result instead of erroring out (UI15).
+        if (request.idempotencyKey() != null && !request.idempotencyKey().isBlank()) {
+            MovementResponse replay = findByIdempotencyKey(request.idempotencyKey());
+            if (replay != null) return replay;
+        }
+
         List<DepositSlot> locked = jdbc.query(
             "select id, code, zone_id, status::text, useful_capacity_liters from deposit "
                 + "where center_id = ? and active = true and (code = ? or code = ?) order by id for update",
             (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getString("code"),
                 rs.getObject("zone_id", UUID.class), rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")), centerId, sourceCode, destinationCode);
         DepositSlot source = locked.stream().filter(item -> item.code().equals(sourceCode)).findFirst()
-            .orElseThrow(() -> new NotFoundException("Source deposit not found."));
+            .orElseThrow(() -> new NotFoundException("Depósito de origen no encontrado."));
         context.requireInZone("MOVEMENT_REGISTER", source.zoneId());
         DepositSlot destination = exit ? null : locked.stream().filter(item -> item.code().equals(destinationCode)).findFirst()
-            .orElseThrow(() -> new NotFoundException("Destination deposit not found."));
+            .orElseThrow(() -> new NotFoundException("Depósito de destino no encontrado."));
         if (destination != null) {
             context.requireInZone("MOVEMENT_REGISTER", destination.zoneId());
         }
         if (destination != null && !destination.status().equals("AVAILABLE") && !destination.status().equals("OCCUPIED")) {
-            throw new BusinessRuleException("Destination deposit cannot receive product in its current state.");
+            throw new BusinessRuleException("DEPOSIT_NOT_AVAILABLE",
+                "El depósito de destino no admite producto en su estado actual.");
         }
         if (!source.status().equals("OCCUPIED")) {
-            throw new BusinessRuleException("Source deposit is not marked as occupied.");
+            throw new BusinessRuleException("El depósito de origen no está marcado como ocupado.");
         }
         OccupiedUnit sourceUnit = activeUnit(source.id());
-        if (sourceUnit == null) throw new BusinessRuleException("Source deposit has no active content.");
+        if (sourceUnit == null) throw new BusinessRuleException("El depósito de origen no tiene contenido activo.");
         BigDecimal withdrawn = request.volumeLiters().add(request.lossLiters());
+
+        // F2-06 stale balance: if the wizard knew a specific balance when it computed the
+        // withdrawal, ensure that balance is still the one in the database before we proceed.
+        if (request.expectedSourceLiters() != null
+                && sourceUnit.volume().compareTo(request.expectedSourceLiters()) != 0) {
+            throw new StaleBalanceException(request.expectedSourceLiters(), sourceUnit.volume(), source.code());
+        }
+
         if (withdrawn.compareTo(sourceUnit.volume()) > 0) {
-            throw new BusinessRuleException("Withdrawal exceeds the available source volume.");
+            throw new BusinessRuleException("INSUFFICIENT_VOLUME",
+                "La retirada supera el volumen disponible en el origen.");
         }
         Instant effectiveAt = request.effectiveDate().atTime(request.effectiveTime()).atZone(timezone).toInstant();
-        if (effectiveAt.isBefore(sourceUnit.startedAt())) throw new BusinessRuleException("Effective time precedes the source occupation.");
+        if (effectiveAt.isBefore(sourceUnit.startedAt())) throw new BusinessRuleException("La fecha efectiva es anterior al inicio de la ocupación del origen.");
         OccupiedUnit destinationUnit = destination == null ? null : activeUnit(destination.id());
         if (destination != null && destination.status().equals("OCCUPIED") != (destinationUnit != null)) {
-            throw new BusinessRuleException("Destination status and occupation are inconsistent.");
+            throw new BusinessRuleException("El estado del depósito de destino y su ocupación son incoherentes.");
         }
+
+        // F2-06 stale balance: destination can be checked too (volume 0 if it's empty).
+        if (request.expectedDestinationLiters() != null && destination != null) {
+            BigDecimal currentDestination = destinationUnit == null ? BigDecimal.ZERO : destinationUnit.volume();
+            if (currentDestination.compareTo(request.expectedDestinationLiters()) != 0) {
+                throw new StaleBalanceException(request.expectedDestinationLiters(), currentDestination, destination.code());
+            }
+        }
+
         if (destinationUnit != null && !request.authorizeMixture()) {
-            throw new BusinessRuleException("An occupied destination requires explicit mixture authorization.");
+            throw new BusinessRuleException("MIXTURE_NOT_AUTHORIZED",
+                "El destino está ocupado: necesitas autorizar la mezcla explícitamente.");
         }
         if (destinationUnit != null && request.authorizeMixture()) {
             context.requireInZone("MIXTURE_AUTHORIZE", destination.zoneId());
         }
         if (destinationUnit != null && effectiveAt.isBefore(destinationUnit.startedAt())) {
-            throw new BusinessRuleException("Effective time precedes the destination occupation.");
+            throw new BusinessRuleException("La fecha efectiva es anterior al inicio de la ocupación del destino.");
         }
         BigDecimal destinationFinal = (destinationUnit == null ? BigDecimal.ZERO : destinationUnit.volume())
             .add(exit ? BigDecimal.ZERO : request.volumeLiters());
         if (destination != null && destinationFinal.compareTo(destination.capacity()) > 0) {
-            throw new BusinessRuleException("Movement exceeds destination useful capacity.");
+            throw new BusinessRuleException("CAPACITY_EXCEEDED",
+                "El movimiento supera la capacidad útil del depósito de destino.");
         }
         if (request.idempotencyKey() != null && !request.idempotencyKey().isBlank()) {
-            List<String> duplicate = jdbc.query("select code from movement where idempotency_key = ?",
-                (rs, index) -> rs.getString(1), request.idempotencyKey());
-            if (!duplicate.isEmpty()) throw new BusinessRuleException("This movement was already registered: " + duplicate.getFirst());
+            MovementResponse replay = findByIdempotencyKey(request.idempotencyKey());
+            if (replay != null) return replay;
         }
         UUID responsibleId = responsibleId(request.responsible(), centerId);
         UUID movementId = UUID.randomUUID();
@@ -127,7 +158,7 @@ public class MovementService {
                 jdbc.update("insert into lot(id, code, center_id, campaign, entry_date, responsible_id, origin_summary) "
                         + "values (?, ?, ?, ?, ?, ?, ?)", newLotId, newLotCode, centerId,
                     request.effectiveDate().getYear(), request.effectiveDate(), responsibleId,
-                    "Mixture of " + sourceUnit.lotCode() + " and " + destinationUnit.lotCode());
+                    "Mezcla de " + sourceUnit.lotCode() + " y " + destinationUnit.lotCode());
                 jdbc.update("update occupation set end_at = ? where id = ?", Timestamp.from(effectiveAt), destinationUnit.occupationId());
                 jdbc.update("update content_unit set active = false where id = ?", destinationUnit.contentId());
                 resultContentId = UUID.randomUUID();
@@ -203,6 +234,31 @@ public class MovementService {
         jdbc.update("update occupation set end_at = ?, volume_liters = 0 where id = ?", Timestamp.from(effectiveAt), sourceUnit.occupationId());
         jdbc.update("update content_unit set volume_liters = 0, active = false where id = ?", sourceUnit.contentId());
         jdbc.update("update deposit set status = 'PENDING_CLEANING'::deposit_status, updated_at = now() where id = ?", source.id());
+    }
+
+    /** F2-04: return the original {@link MovementResponse} for a previously used idempotency key. */
+    private MovementResponse findByIdempotencyKey(String idempotencyKey) {
+        List<MovementResponse> existing = jdbc.query("""
+            select m.code, m.type::text as type,
+                   (select o.volume_liters from occupation o where o.content_unit_id = ml.source_content_unit_id
+                      order by o.start_at desc limit 1) as source_final,
+                   coalesce(dest.code, '') as destination_code,
+                   (select o.volume_liters from occupation o where o.content_unit_id = ml.destination_content_unit_id
+                      order by o.start_at desc limit 1) as destination_final
+              from movement m join movement_line ml on ml.movement_id = m.id
+              left join content_unit dest on dest.id = ml.destination_content_unit_id
+             where m.idempotency_key = ?
+             order by ml.id
+             limit 1
+            """,
+            (rs, index) -> new MovementResponse(
+                rs.getString("code"),
+                "MIX".equals(rs.getString("type")),
+                rs.getBigDecimal("source_final"),
+                rs.getString("destination_code"),
+                rs.getBigDecimal("destination_final")),
+            idempotencyKey);
+        return existing.isEmpty() ? null : existing.getFirst();
     }
 
     private OccupiedUnit activeUnit(UUID depositId) {

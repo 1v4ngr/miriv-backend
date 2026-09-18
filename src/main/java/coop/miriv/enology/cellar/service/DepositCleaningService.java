@@ -56,13 +56,15 @@ public class DepositCleaningService {
 
     private DepositLock lock(String code) {
         UUID centerId = context.centerId();
-        List<DepositLock> rows = jdbc.query("select id, status::text from deposit where center_id = ? "
+        List<DepositLock> rows = jdbc.query("select id, zone_id, status::text from deposit where center_id = ? "
                 + "and code = ? and active = true for update",
-            (rs, index) -> new DepositLock(rs.getObject("id", UUID.class), rs.getString("status")),
+            (rs, index) -> new DepositLock(rs.getObject("id", UUID.class),
+                rs.getObject("zone_id", UUID.class), rs.getString("status")),
             centerId, code.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""));
         if (rows.isEmpty()) throw new NotFoundException("Deposit not found.");
+        context.requireInZone("DEPOSIT_CLEANING", rows.getFirst().zoneId());
         return rows.getFirst();
     }
 
-    private record DepositLock(UUID id, String status) {}
+    private record DepositLock(UUID id, UUID zoneId, String status) {}
 }
