@@ -3,7 +3,10 @@ package coop.miriv.enology.identity.service;
 import coop.miriv.enology.identity.entity.AppUser;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -11,9 +14,17 @@ import org.springframework.security.core.userdetails.UserDetails;
 public class AppUserPrincipal implements UserDetails {
 
     private final AppUser user;
+    private final Map<String, PermissionScope> permissions;
+    private final PermissionScope readScope;
 
     public AppUserPrincipal(AppUser user) {
+        this(user, Map.of(), new PermissionScope(true, Set.of()));
+    }
+
+    public AppUserPrincipal(AppUser user, Map<String, PermissionScope> permissions, PermissionScope readScope) {
         this.user = user;
+        this.permissions = permissions;
+        this.readScope = readScope;
     }
 
     public UUID getUserId() {
@@ -24,11 +35,21 @@ public class AppUserPrincipal implements UserDetails {
         return user;
     }
 
+    public Map<String, PermissionScope> getPermissions() {
+        return permissions;
+    }
+
+    public PermissionScope getReadScope() {
+        return readScope;
+    }
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
-        return user.getRoles().stream()
-            .map(assignment -> new SimpleGrantedAuthority("ROLE_" + assignment.getRole().getCode()))
+        return Stream.concat(
+                user.getRoles().stream().map(assignment -> "ROLE_" + assignment.getRole().getCode()),
+                permissions.keySet().stream().map(code -> "PERM_" + code))
             .distinct()
+            .map(SimpleGrantedAuthority::new)
             .toList();
     }
 
