@@ -16,9 +16,8 @@ import coop.miriv.enology.identity.entity.AppUser;
 import coop.miriv.enology.identity.entity.Center;
 import coop.miriv.enology.identity.entity.RoleCode;
 import coop.miriv.enology.identity.entity.Zone;
-import coop.miriv.enology.identity.repository.AppUserRepository;
 import coop.miriv.enology.identity.repository.ZoneRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -40,25 +39,22 @@ public class DepositService {
     private final DepositRepository deposits;
     private final DepositReadRepository readRepository;
     private final ZoneRepository zones;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
     private final JdbcTemplate jdbc;
 
     public DepositService(DepositRepository deposits, DepositReadRepository readRepository,
-                          ZoneRepository zones, AppUserRepository users, CurrentUserProvider currentUser,
-                          JdbcTemplate jdbc) {
+                          ZoneRepository zones, CurrentUserContext context, JdbcTemplate jdbc) {
         this.deposits = deposits;
         this.readRepository = readRepository;
         this.zones = zones;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
         this.jdbc = jdbc;
     }
 
     @Transactional(readOnly = true)
     public List<DepositResponse> list() {
-        AppUser user = user();
-        UUID centerId = center(user).getId();
+        AppUser user = context.user();
+        UUID centerId = context.centerId();
         Map<UUID, List<OccupationResponse>> occupations = readRepository.occupationsByCenter(centerId);
         Map<UUID, List<CleaningRecordResponse>> cleaning = readRepository.cleaningByCenter(centerId);
         return deposits.findAllByCenter_IdOrderByCodeAsc(centerId).stream()
@@ -70,8 +66,8 @@ public class DepositService {
 
     @Transactional(readOnly = true)
     public DepositResponse get(String code) {
-        AppUser user = user();
-        UUID centerId = center(user).getId();
+        AppUser user = context.user();
+        UUID centerId = context.centerId();
         Deposit deposit = deposits.findByCenter_IdAndCodeIgnoreCase(centerId, normalize(code))
             .filter(Deposit::isActive)
             .filter(item -> canReadZone(user, item.getZone()))
@@ -82,8 +78,8 @@ public class DepositService {
 
     @Transactional
     public DepositResponse create(DepositRequest request) {
-        AppUser user = user();
-        Center center = center(user);
+        AppUser user = context.user();
+        Center center = context.center();
         if (!request.center().equalsIgnoreCase(center.getCode())
             && !request.center().equalsIgnoreCase(center.getName())) {
             throw new AccessDeniedException("The requested center is outside your scope.");
@@ -109,8 +105,8 @@ public class DepositService {
 
     @Transactional
     public DepositResponse update(String code, UpdateDepositRequest request) {
-        AppUser user = user();
-        Center center = center(user);
+        AppUser user = context.user();
+        Center center = context.center();
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
             .orElseThrow(() -> new NotFoundException("Deposit not found."));
@@ -134,8 +130,8 @@ public class DepositService {
 
     @Transactional
     public void delete(String code) {
-        AppUser user = user();
-        Center center = center(user);
+        AppUser user = context.user();
+        Center center = context.center();
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
             .orElseThrow(() -> new NotFoundException("Deposit not found."));
@@ -189,19 +185,6 @@ public class DepositService {
             deposit.isRefrigerated(), status, "none",
             occupations.getOrDefault(deposit.getId(), List.of()),
             cleaning.getOrDefault(deposit.getId(), List.of()));
-    }
-
-    private AppUser user() {
-        return users.findById(currentUser.requireCurrentUserId())
-            .filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-    }
-
-    private Center center(AppUser user) {
-        if (user.getCenter() == null) {
-            throw new AccessDeniedException("Current user has no assigned center.");
-        }
-        return user.getCenter();
     }
 
     private Zone resolveZone(UUID centerId, String value) {

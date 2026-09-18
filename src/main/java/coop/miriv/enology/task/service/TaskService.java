@@ -4,8 +4,7 @@ import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.entity.AppUser;
 import coop.miriv.enology.identity.entity.RoleCode;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.task.dto.CompleteTaskRequest;
 import coop.miriv.enology.task.dto.CreateTaskRequest;
 import coop.miriv.enology.task.dto.TaskResponse;
@@ -28,29 +27,27 @@ public class TaskService {
     private static final Set<String> PRIORITIES = Set.of("NONE", "LOW", "MEDIUM", "HIGH");
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
 
-    public TaskService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser) {
+    public TaskService(JdbcTemplate jdbc, CurrentUserContext context) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
     }
 
     @Transactional(readOnly = true)
     public List<TaskResponse> list() {
         return jdbc.query(TASK_SELECT + " where d.center_id = ? order by t.due_at nulls last, t.created_at desc",
-            (rs, index) -> response(rs), centerId());
+            (rs, index) -> response(rs), context.centerId());
     }
 
     @Transactional(readOnly = true)
     public TaskResponse get(String code) {
-        return find(code, centerId());
+        return find(code, context.centerId());
     }
 
     @Transactional
     public TaskResponse create(CreateTaskRequest request) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         if (!PRIORITIES.contains(request.priority())) throw new BusinessRuleException("Unsupported task priority.");
         UUID depositId = depositId(request.depositCode(), centerId);
         UUID contentId = contentId(request.contentCode(), centerId);
@@ -85,14 +82,14 @@ public class TaskService {
             throw new BusinessRuleException("Task is not open for completion.");
         }
         if (task.contentId() != null) requireCurrentLocation(task.contentId(), task.depositId());
-        UUID sampleId = sampleId(request.sampleCode(), task.contentId(), centerId(),
+        UUID sampleId = sampleId(request.sampleCode(), task.contentId(), context.centerId(),
             "ANALYSIS_REQUIRED".equals(task.completionCriterion()));
         if ("ANALYSIS_REQUIRED".equals(task.completionCriterion()) && sampleId == null) {
             throw new BusinessRuleException("A linked sample is required to complete this analytical task.");
         }
         jdbc.update("insert into task_execution(id, task_id, result, observations, sample_id, recorded_by_id) "
                 + "values (?, ?, ?, ?, ?, ?)", UUID.randomUUID(), task.id(), request.result().trim(),
-            blankToNull(request.observations()), sampleId, currentUser.requireCurrentUserId());
+            blankToNull(request.observations()), sampleId, context.userId());
         jdbc.update("update task set status = 'DONE'::task_status where id = ?", task.id());
         return get(code);
     }
@@ -131,7 +128,7 @@ public class TaskService {
             (rs, index) -> new TaskLock(rs.getObject("id", UUID.class),
                 rs.getObject("deposit_id", UUID.class), rs.getObject("content_unit_id", UUID.class),
                 rs.getObject("responsible_id", UUID.class),
-                rs.getString("status"), rs.getString("completion_criterion")), centerId(), normalize(code));
+                rs.getString("status"), rs.getString("completion_criterion")), context.centerId(), normalize(code));
         if (rows.isEmpty()) throw new NotFoundException("Task not found.");
         return rows.getFirst();
     }
@@ -179,19 +176,11 @@ public class TaskService {
     }
 
     private void requireAssigneeOrManager(TaskLock task) {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
+        AppUser user = context.user();
         if (!user.getId().equals(task.responsibleId()) && !user.hasRole(RoleCode.ENOLOGIST)
             && !user.hasRole(RoleCode.PRODUCTION_MANAGER)) {
             throw new AccessDeniedException("Task is assigned to another user.");
         }
-    }
-
-    private UUID centerId() {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        return user.getCenter().getId();
     }
 
     private String normalize(String code) { return code.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }

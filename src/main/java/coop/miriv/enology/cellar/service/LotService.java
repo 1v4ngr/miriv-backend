@@ -9,9 +9,7 @@ import coop.miriv.enology.cellar.dto.UpdateLotRequest;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -25,7 +23,6 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,21 +30,19 @@ import org.springframework.transaction.annotation.Transactional;
 public class LotService {
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
     private final ZoneId timezone;
 
-    public LotService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser,
+    public LotService(JdbcTemplate jdbc, CurrentUserContext context,
                        @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
         this.timezone = ZoneId.of(timezone);
     }
 
     @Transactional(readOnly = true)
     public List<LotResponse> list() {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         List<LotRow> rows = jdbc.query(LOT_SELECT + " where l.center_id = ? order by l.created_at desc",
             (rs, index) -> row(rs), centerId);
         return enrich(rows);
@@ -55,12 +50,12 @@ public class LotService {
 
     @Transactional(readOnly = true)
     public LotResponse get(String code) {
-        return enrich(List.of(find(code, centerId()))).getFirst();
+        return enrich(List.of(find(code, context.centerId()))).getFirst();
     }
 
     @Transactional(readOnly = true)
     public List<LineageEventResponse> genealogy(String code) {
-        LotRow lot = find(code, centerId());
+        LotRow lot = find(code, context.centerId());
         return jdbc.query("""
             select parent.code as origin, child.code as destination, m.effective_at, m.code as movement,
                    lineage.contributed_liters as volume_liters, m.type::text as note
@@ -86,7 +81,7 @@ public class LotService {
 
     @Transactional
     public LotResponse create(CreateLotRequest request) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         LotRequest lot = request.lot();
         String code = normalize(lot.code());
         if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from lot where code = ?)", Boolean.class, code))) {
@@ -107,7 +102,7 @@ public class LotService {
 
     @Transactional
     public LotResponse update(String code, UpdateLotRequest request) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         LotRow lot = find(code, centerId);
         UUID destinationId = catalogId("destination", request.destination());
         UUID responsibleId = responsibleId(request.responsible(), centerId);
@@ -195,13 +190,6 @@ public class LotService {
         return new LotRow(rs.getObject("id", UUID.class), rs.getString("code"), rs.getInt("campaign"),
             rs.getString("category"), rs.getString("destination"), rs.getString("responsible"),
             rs.getDate("entry_date").toLocalDate(), rs.getString("origin_summary"), rs.getBoolean("archived"));
-    }
-
-    private UUID centerId() {
-        AppUser user = users.findById(currentUser.requireCurrentUserId())
-            .filter(AppUser::isActive).orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        return user.getCenter().getId();
     }
 
     private String normalize(String code) { return code.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }

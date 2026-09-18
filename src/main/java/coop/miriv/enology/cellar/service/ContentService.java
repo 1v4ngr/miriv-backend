@@ -7,16 +7,13 @@ import coop.miriv.enology.cellar.dto.OccupationResponse;
 import coop.miriv.enology.cellar.dto.StateReviewRequest;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.laboratory.service.LaboratoryService;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,22 +24,20 @@ public class ContentService {
     private final DepositService deposits;
     private final LotService lots;
     private final LaboratoryService laboratory;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
 
     public ContentService(JdbcTemplate jdbc, DepositService deposits, LotService lots,
-                          LaboratoryService laboratory, AppUserRepository users, CurrentUserProvider currentUser) {
+                          LaboratoryService laboratory, CurrentUserContext context) {
         this.jdbc = jdbc;
         this.deposits = deposits;
         this.lots = lots;
         this.laboratory = laboratory;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
     }
 
     @Transactional(readOnly = true)
     public ContentResponse get(String code) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         String normalized = normalize(code);
         List<ContentLocation> locations = jdbc.query("select cu.id, l.code as lot_code, d.code as deposit_code, "
                 + "o.end_at is null as active from content_unit cu join lot l on l.id = cu.lot_id "
@@ -76,7 +71,7 @@ public class ContentService {
         if (!allowed.contains(request.decision())) throw new BusinessRuleException("Unsupported state decision.");
         ContentResponse content = get(code);
         if (!content.active()) throw new BusinessRuleException("Only active content can have a state confirmed.");
-        UUID actor = currentUser.requireCurrentUserId();
+        UUID actor = context.userId();
         UUID contentId = jdbc.queryForObject("select id from content_unit where code = ?", UUID.class, normalize(code));
         String previous = jdbc.query("select confirmed_status from fermentation_state where content_unit_id = ? "
                 + "and process = cast(? as fermentation_process) for update",
@@ -113,13 +108,6 @@ public class ContentService {
             case "NOT_DESIRED" -> "Not planned";
             default -> "Not decided in plan";
         };
-    }
-
-    private UUID centerId() {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        return user.getCenter().getId();
     }
 
     private String normalize(String code) { return code.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }

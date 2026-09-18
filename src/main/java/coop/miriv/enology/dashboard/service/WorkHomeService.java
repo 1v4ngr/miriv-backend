@@ -6,8 +6,7 @@ import coop.miriv.enology.dashboard.dto.OwnTasks;
 import coop.miriv.enology.dashboard.dto.RecentActivity;
 import coop.miriv.enology.dashboard.dto.WorkHomeResponse;
 import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
@@ -15,7 +14,6 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -23,24 +21,20 @@ import org.springframework.transaction.annotation.Transactional;
 public class WorkHomeService {
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
     private final ZoneId timezone;
 
-    public WorkHomeService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser,
+    public WorkHomeService(JdbcTemplate jdbc, CurrentUserContext context,
                            @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
         this.timezone = ZoneId.of(timezone);
     }
 
     @Transactional(readOnly = true)
     public WorkHomeResponse get() {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        UUID centerId = user.getCenter().getId();
+        AppUser user = context.user();
+        UUID centerId = context.centerId();
         int urgent = count("select count(*) from incident i join deposit d on d.id = i.deposit_id "
             + "where d.center_id = ? and i.priority = 'URGENT'::alert_priority "
             + "and i.status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status)", centerId);
@@ -84,7 +78,7 @@ public class WorkHomeService {
                 rs.getTimestamp("effective_at").toInstant().atZone(timezone).format(DateTimeFormatter.ofPattern("HH:mm")),
                 rs.getString("type") + " " + rs.getString("code")), centerId, centerId);
         String updatedAt = Instant.now().atZone(timezone).format(DateTimeFormatter.ofPattern("HH:mm"));
-        return new WorkHomeResponse(user.getCenter().getName(),
+        return new WorkHomeResponse(context.center().getName(),
             "Campaign " + java.time.LocalDate.now(timezone).getYear(), updatedAt, urgent, attention,
             metrics, items, new OwnTasks("available", ownTaskCount, ownTaskCount + " open tasks"), activity);
     }

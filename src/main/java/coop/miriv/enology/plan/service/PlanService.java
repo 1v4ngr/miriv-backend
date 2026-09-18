@@ -3,9 +3,7 @@ package coop.miriv.enology.plan.service;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.plan.dto.CreatePlanRequest;
 import coop.miriv.enology.plan.dto.PlanResponse;
 import coop.miriv.enology.plan.dto.PlanVersionRequest;
@@ -19,7 +17,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,13 +26,11 @@ public class PlanService {
     private static final Set<String> INTENTS = Set.of("PLANNED", "NOT_DESIRED", "PENDING_DECISION");
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
 
-    public PlanService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser) {
+    public PlanService(JdbcTemplate jdbc, CurrentUserContext context) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
     }
 
     @Transactional(readOnly = true)
@@ -70,7 +65,7 @@ public class PlanService {
         validate(request.version());
         UUID destinationId = destinationId(request.destination());
         UUID planId = UUID.randomUUID();
-        UUID actor = currentUser.requireCurrentUserId();
+        UUID actor = context.userId();
         jdbc.update("insert into elaboration_plan(id, content_unit_id, name, destination_id, responsible_id) "
                 + "values (?, ?, ?, ?, ?)", planId, content.id(), request.name().trim(), destinationId, actor);
         insertVersion(planId, 1, actor, request.version());
@@ -88,7 +83,7 @@ public class PlanService {
         UUID planId = plans.getFirst();
         Integer nextNumber = jdbc.queryForObject("select coalesce(max(version_number), 0) + 1 "
             + "from plan_version where plan_id = ?", Integer.class, planId);
-        insertVersion(planId, nextNumber, currentUser.requireCurrentUserId(), request);
+        insertVersion(planId, nextNumber, context.userId(), request);
         return get(contentCode);
     }
 
@@ -147,13 +142,11 @@ public class PlanService {
     }
 
     private ContentScope content(String code) {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
+        UUID centerId = context.centerId();
         List<ContentScope> matches = jdbc.query("select cu.id, cu.code, cu.active from content_unit cu "
                 + "join lot l on l.id = cu.lot_id where l.center_id = ? and cu.code = ?",
             (rs, index) -> new ContentScope(rs.getObject("id", UUID.class), rs.getString("code"),
-                rs.getBoolean("active")), user.getCenter().getId(), normalize(code));
+                rs.getBoolean("active")), centerId, normalize(code));
         if (matches.isEmpty()) throw new NotFoundException("Content unit not found.");
         return matches.getFirst();
     }

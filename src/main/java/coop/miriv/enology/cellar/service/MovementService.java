@@ -4,9 +4,7 @@ import coop.miriv.enology.cellar.dto.MovementRequest;
 import coop.miriv.enology.cellar.dto.MovementResponse;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import java.math.BigDecimal;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -19,7 +17,6 @@ import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,21 +24,19 @@ import org.springframework.transaction.annotation.Transactional;
 public class MovementService {
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
     private final ZoneId timezone;
 
-    public MovementService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser,
+    public MovementService(JdbcTemplate jdbc, CurrentUserContext context,
                            @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
         this.timezone = ZoneId.of(timezone);
     }
 
     @Transactional
     public MovementResponse register(MovementRequest request) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         boolean exit = request.type().equalsIgnoreCase("Salida");
         if (!exit && !request.type().equalsIgnoreCase("Trasiego") && !request.type().equalsIgnoreCase("Trasvase")) {
             throw new BusinessRuleException("Unsupported movement type.");
@@ -189,13 +184,6 @@ public class MovementService {
             (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim(), value.trim());
         if (ids.isEmpty()) throw new NotFoundException("Responsible user not found in the current center.");
         return ids.getFirst();
-    }
-
-    private UUID centerId() {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        return user.getCenter().getId();
     }
 
     private String code(String prefix, int year, UUID id) {

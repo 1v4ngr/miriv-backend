@@ -2,9 +2,7 @@ package coop.miriv.enology.incident.service;
 
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.incident.dto.IncidentEventResponse;
 import coop.miriv.enology.incident.dto.IncidentResponse;
 import coop.miriv.enology.incident.dto.ResolveIncidentRequest;
@@ -17,7 +15,6 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,27 +24,25 @@ public class IncidentService {
     private static final Set<String> DISCARD_CATEGORIES = Set.of("DATA_ERROR", "FALSE_POSITIVE", "EXPECTED_CONDITION");
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
 
-    public IncidentService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser) {
+    public IncidentService(JdbcTemplate jdbc, CurrentUserContext context) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
     }
 
     @Transactional(readOnly = true)
     public List<IncidentResponse> list() {
         return jdbc.query(INCIDENT_SELECT + " where coalesce(d.center_id, l.center_id) = ? "
                 + "order by case i.priority when 'URGENT' then 0 when 'HIGH' then 1 else 2 end, i.opened_at desc",
-            (rs, index) -> response(rs), centerId());
+            (rs, index) -> response(rs), context.centerId());
     }
 
     @Transactional(readOnly = true)
     public IncidentResponse get(String code) {
         List<IncidentResponse> rows = jdbc.query(INCIDENT_SELECT
                 + " where coalesce(d.center_id, l.center_id) = ? and i.code = ?",
-            (rs, index) -> response(rs), centerId(), normalize(code));
+            (rs, index) -> response(rs), context.centerId(), normalize(code));
         if (rows.isEmpty()) throw new NotFoundException("Incident not found.");
         return rows.getFirst();
     }
@@ -67,7 +62,7 @@ public class IncidentService {
     public IncidentResponse assign(String code, String responsible) {
         LockedIncident incident = lock(code);
         requireOpen(incident);
-        UUID responsibleId = responsibleId(responsible, centerId());
+        UUID responsibleId = responsibleId(responsible, context.centerId());
         jdbc.update("update incident set responsible_id = ?, status = 'ASSIGNED'::incident_status where id = ?",
             responsibleId, incident.id());
         event(incident.id(), "ASSIGNED", "Assigned to " + responsible.trim());
@@ -98,7 +93,7 @@ public class IncidentService {
         String outcome = discard ? "DISCARDED" : "RESOLVED";
         jdbc.update("update incident set status = cast(? as incident_status), resolution = cast(? as incident_resolution), "
                 + "resolution_reason = ?, resolved_at = now(), resolved_by_id = ?, silenced_until = null where id = ?",
-            outcome, outcome, reason, currentUser.requireCurrentUserId(), incident.id());
+            outcome, outcome, reason, context.userId(), incident.id());
         event(incident.id(), outcome, reason);
         return get(code);
     }
@@ -115,7 +110,8 @@ public class IncidentService {
                 + "and superseded = false order by recorded_at", (e, index) -> e.getString(1), id);
         return new IncidentResponse(rs.getString("code"), rs.getString("title"), rs.getString("deposit_code"),
             rs.getString("content_code"), rs.getString("priority"), rs.getString("status"),
-            rs.getString("responsible"), rs.getTimestamp("opened_at").toInstant(),
+            rs.getString("responsible"), rs.getString("responsible_username"),
+            rs.getTimestamp("opened_at").toInstant(),
             rs.getTimestamp("silenced_until") == null ? null : rs.getTimestamp("silenced_until").toInstant(),
             rs.getString("resolution"), rs.getString("resolution_reason"), events, evidence);
     }
@@ -127,7 +123,7 @@ public class IncidentService {
                 + "left join lot l on l.id = cu.lot_id "
                 + "where coalesce(d.center_id, l.center_id) = ? and i.code = ? for update of i",
             (rs, index) -> new LockedIncident(rs.getObject("id", UUID.class), rs.getString("status")),
-            centerId(), normalize(code));
+            context.centerId(), normalize(code));
         if (rows.isEmpty()) throw new NotFoundException("Incident not found.");
         return rows.getFirst();
     }
@@ -141,7 +137,7 @@ public class IncidentService {
     private void event(UUID id, String type, String note) {
         jdbc.update("insert into incident_event(id, incident_id, event_type, note, created_by_id) "
                 + "values (?, ?, ?, ?, ?)", UUID.randomUUID(), id, type, note,
-            currentUser.requireCurrentUserId());
+            context.userId());
     }
 
     private UUID responsibleId(String value, UUID centerId) {
@@ -152,17 +148,11 @@ public class IncidentService {
         return ids.getFirst();
     }
 
-    private UUID centerId() {
-        AppUser user = users.findById(currentUser.requireCurrentUserId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        return user.getCenter().getId();
-    }
-
     private String normalize(String code) { return code.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }
 
     private static final String INCIDENT_SELECT = "select i.id, i.code, i.title, d.code as deposit_code, "
         + "cu.code as content_code, i.priority::text, i.status::text, u.full_name as responsible, "
+        + "u.username as responsible_username, "
         + "i.opened_at, i.silenced_until, i.resolution::text, i.resolution_reason "
         + "from incident i left join deposit d on d.id = i.deposit_id "
         + "left join content_unit cu on cu.id = i.content_unit_id "

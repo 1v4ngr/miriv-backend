@@ -3,9 +3,7 @@ package coop.miriv.enology.laboratory.service;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
-import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.repository.AppUserRepository;
-import coop.miriv.enology.identity.service.CurrentUserProvider;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.laboratory.dto.CorrectionRequest;
 import coop.miriv.enology.laboratory.dto.NewSampleRequest;
 import coop.miriv.enology.laboratory.dto.PanelParameterResponse;
@@ -45,31 +43,29 @@ public class LaboratoryService {
         Map.entry("Ácido láctico", "L_LACTIC_ACID"));
 
     private final JdbcTemplate jdbc;
-    private final AppUserRepository users;
-    private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
     private final ZoneId timezone;
 
-    public LaboratoryService(JdbcTemplate jdbc, AppUserRepository users, CurrentUserProvider currentUser,
+    public LaboratoryService(JdbcTemplate jdbc, CurrentUserContext context,
                              @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
-        this.users = users;
-        this.currentUser = currentUser;
+        this.context = context;
         this.timezone = ZoneId.of(timezone);
     }
 
     @Transactional(readOnly = true)
     public List<SampleResponse> list() {
         List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ? order by s.taken_at desc",
-            (rs, index) -> sampleRow(rs), centerId());
+            (rs, index) -> sampleRow(rs), context.centerId());
         return rows.stream().map(this::response).toList();
     }
 
     @Transactional(readOnly = true)
-    public SampleResponse get(String code) { return response(find(code, centerId())); }
+    public SampleResponse get(String code) { return response(find(code, context.centerId())); }
 
     @Transactional
     public SampleResponse create(NewSampleRequest request) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         String code = normalize(request.code());
         if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sample where code = ?)", Boolean.class, code))) {
             throw new ConflictException("A sample with this code already exists.");
@@ -266,7 +262,7 @@ public class LaboratoryService {
     }
 
     private SampleRow findForUpdate(String code) {
-        UUID centerId = centerId();
+        UUID centerId = context.centerId();
         List<UUID> ids = jdbc.query("select a.id from analysis a join sample s on s.id = a.sample_id "
                 + "join deposit d on d.id = s.deposit_id_at_sampling where d.center_id = ? and s.code = ? "
                 + "for update of a", (rs, index) -> rs.getObject(1, UUID.class), centerId, normalize(code));
@@ -342,14 +338,7 @@ public class LaboratoryService {
         return ids.getFirst();
     }
 
-    private UUID actorId() { return currentUser.requireCurrentUserId(); }
-
-    private UUID centerId() {
-        AppUser user = users.findById(actorId()).filter(AppUser::isActive)
-            .orElseThrow(() -> new AccessDeniedException("Current user is not active."));
-        if (user.getCenter() == null) throw new AccessDeniedException("Current user has no assigned center.");
-        return user.getCenter().getId();
-    }
+    private UUID actorId() { return context.userId(); }
 
     private BigDecimal decimal(String raw) {
         if (raw == null || raw.isBlank()) throw new BusinessRuleException("Numeric value or limit is required.");
