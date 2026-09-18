@@ -32,3 +32,10 @@ select u.id, r.id, z.id from app_user u, role r, zone z
 where u.username = 'operario' and r.code = 'CELLAR_OPERATOR'
   and z.code = 'NAVE-A' and z.center_id = '00000000-0000-0000-0000-000000000001'
 on conflict do nothing;
+
+-- F1C-01: the laboratory user also gets ANALYSIS_VALIDATE individually.
+insert into app_user_permission_grant (user_id, permission_id, zone_id, granted_by_id, reason)
+select u.id, p.id, null, null, 'Semilla de desarrollo'
+from app_user u, permission p
+where u.username = 'laboratorio' and p.code = 'ANALYSIS_VALIDATE'
+on conflict do nothing;
