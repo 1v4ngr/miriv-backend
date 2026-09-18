@@ -1,8 +1,12 @@
 package coop.miriv.enology.identity.service;
 
+import coop.miriv.enology.audit.AuditService;
+import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
+import coop.miriv.enology.identity.dto.PendingWorkResponse;
 import coop.miriv.enology.identity.dto.PermissionGrantRequest;
+import coop.miriv.enology.identity.dto.ResetPasswordRequest;
 import coop.miriv.enology.identity.dto.RoleAssignmentRequest;
 import coop.miriv.enology.identity.dto.UserAccountResponse;
 import coop.miriv.enology.identity.dto.UserAccountStatusRequest;
@@ -13,18 +17,25 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class UserAccountService {
 
+    private static final String ADMIN_ROLE_CODE = "ADMIN";
+
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
+    private final AuditService audit;
+    private final PasswordEncoder encoder;
 
-    public UserAccountService(JdbcTemplate jdbc, CurrentUserContext context) {
+    public UserAccountService(JdbcTemplate jdbc, CurrentUserContext context, AuditService audit, PasswordEncoder encoder) {
         this.jdbc = jdbc;
         this.context = context;
+        this.audit = audit;
+        this.encoder = encoder;
     }
 
     @Transactional(readOnly = true)
@@ -39,66 +50,95 @@ public class UserAccountService {
     @Transactional(readOnly = true)
     public UserAccountResponse get(UUID id) {
         UserAccountResponse account = loadAccount(id);
-        if (account == null) throw new NotFoundException("User not found.");
+        if (account == null) throw new NotFoundException("Usuario no encontrado.");
         return account;
     }
 
     @Transactional
     public UserAccountResponse assignRole(UUID userId, RoleAssignmentRequest request) {
+        requireNotSelf(userId, "No puedes cambiar tus propios roles: pide a otro administrador que lo haga.");
         UUID roleId = roleId(request.roleCode());
         UUID zoneId = request.zoneId();
         if (zoneId != null) {
             UUID zoneCenter = jdbc.queryForObject("select center_id from zone where id = ?", UUID.class, zoneId);
             UUID userCenter = jdbc.queryForObject("select center_id from app_user where id = ?", UUID.class, userId);
-            if (!zoneCenter.equals(userCenter)) {
-                throw new AccessDeniedException("Zone belongs to another center.");
+            if (zoneCenter == null || !zoneCenter.equals(userCenter)) {
+                throw new AccessDeniedException("La zona pertenece a otro centro.");
             }
         }
         jdbc.update("insert into app_user_role(id, user_id, role_id, zone_id) values (?, ?, ?, ?)",
             UUID.randomUUID(), userId, roleId, zoneId);
-        audit("USER_ROLE_GRANTED", userId, "Granted role " + request.roleCode() + " (zone=" + zoneId + ")");
+        audit.record("app_user", userId, "ROLE_GRANTED", "Rol " + request.roleCode()
+            + (zoneId == null ? " (todas las zonas)" : " (zona " + zoneId + ")"));
         return get(userId);
     }
 
     @Transactional
     public UserAccountResponse revokeRole(UUID userId, UUID roleAssignmentId) {
-        Integer n = jdbc.query("delete from app_user_role where id = ? and user_id = ? returning role_id",
-            (rs, row) -> rs.getObject(1, UUID.class), roleAssignmentId, userId).size();
-        if (n == null || n == 0) throw new NotFoundException("Role assignment not found.");
-        audit("USER_ROLE_REVOKED", userId, "Revoked role assignment " + roleAssignmentId);
+        requireNotSelf(userId, "No puedes cambiar tus propios roles: pide a otro administrador que lo haga.");
+        String roleCode = jdbc.query("select r.code from app_user_role ur join role r on r.id = ur.role_id "
+                + "where ur.id = ? and ur.user_id = ?", (rs, row) -> rs.getString(1), roleAssignmentId, userId)
+            .stream().findFirst().orElseThrow(() -> new NotFoundException("Asignación de rol no encontrada."));
+        if (ADMIN_ROLE_CODE.equals(roleCode)) requireAnotherActiveAdminRemains(userId);
+        int updated = jdbc.update("delete from app_user_role where id = ? and user_id = ?", roleAssignmentId, userId);
+        if (updated == 0) throw new NotFoundException("Asignación de rol no encontrada.");
+        audit.record("app_user", userId, "ROLE_REVOKED", "Asignación " + roleAssignmentId + " (" + roleCode + ")");
         return get(userId);
     }
 
     @Transactional
     public UserAccountResponse grantPermission(UUID userId, PermissionGrantRequest request) {
+        requireNotSelf(userId, "No puedes concederte permisos a ti mismo: pide a otro administrador que lo haga.");
         UUID permissionId = permissionId(request.permissionCode());
-        if (!jdbc.queryForObject("select grantable from permission where id = ?", Boolean.class, permissionId)) {
-            throw new ConflictException("This permission is not grantable to individual users.");
+        Boolean grantable = jdbc.queryForObject("select grantable from permission where id = ?", Boolean.class, permissionId);
+        if (!Boolean.TRUE.equals(grantable)) {
+            throw new ConflictException("Este permiso no se puede asignar individualmente a un usuario.");
+        }
+        UUID zoneId = request.zoneId();
+        if (zoneId != null) {
+            UUID zoneCenter = jdbc.queryForObject("select center_id from zone where id = ?", UUID.class, zoneId);
+            UUID userCenter = jdbc.queryForObject("select center_id from app_user where id = ?", UUID.class, userId);
+            if (zoneCenter == null || !zoneCenter.equals(userCenter)) {
+                throw new AccessDeniedException("La zona pertenece a otro centro.");
+            }
         }
         UUID id = UUID.randomUUID();
         jdbc.update("insert into app_user_permission_grant(id, user_id, permission_id, zone_id, granted_by_id, reason, valid_from, valid_until) "
-                + "values (?, ?, ?, ?, ?, ?, ?, ?)", id, userId, permissionId, request.zoneId(), context.userId(),
+                + "values (?, ?, ?, ?, ?, ?, ?, ?)", id, userId, permissionId, zoneId, context.userId(),
             request.reason().trim(), Timestamp.from(request.validFrom() == null ? Instant.now() : request.validFrom()),
             request.validUntil() == null ? null : Timestamp.from(request.validUntil()));
-        audit("USER_PERMISSION_GRANTED", userId, "Granted permission " + request.permissionCode() + " (zone=" + request.zoneId() + ")");
+        audit.record("app_user", userId, "GRANT", "Permiso " + request.permissionCode() + ": " + request.reason().trim());
         return get(userId);
     }
 
     @Transactional
     public UserAccountResponse revokePermission(UUID userId, UUID grantId) {
+        requireNotSelf(userId, "No puedes cambiar tus propias concesiones: pide a otro administrador que lo haga.");
         Integer n = jdbc.update("delete from app_user_permission_grant where id = ? and user_id = ?", grantId, userId);
-        if (n == null || n == 0) throw new NotFoundException("Permission grant not found.");
-        audit("USER_PERMISSION_REVOKED", userId, "Revoked permission grant " + grantId);
+        if (n == null || n == 0) throw new NotFoundException("Otorgamiento de permiso no encontrado.");
+        audit.record("app_user", userId, "REVOKE", "Concesión " + grantId);
         return get(userId);
+    }
+
+    @Transactional(readOnly = true)
+    public PendingWorkResponse pendingWork(UUID userId) {
+        List<String> tasks = jdbc.query("select code from task where responsible_id = ? "
+                + "and status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status) order by due_at nulls last",
+            (rs, row) -> rs.getString(1), userId);
+        List<String> incidents = jdbc.query("select code from incident where responsible_id = ? "
+                + "and status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status) order by opened_at",
+            (rs, row) -> rs.getString(1), userId);
+        return new PendingWorkResponse(tasks, incidents);
     }
 
     @Transactional
     public UserAccountResponse deactivate(UUID userId, UserAccountStatusRequest request) {
-        if (userId.equals(context.userId())) throw new ConflictException("You cannot deactivate your own account.");
+        requireNotSelf(userId, "No puedes desactivar tu propia cuenta: pide a otro administrador que lo haga.");
+        if (isActiveAdmin(userId)) requireAnotherActiveAdminRemains(userId);
         int updated = jdbc.update("update app_user set active = false, deactivated_at = ? where id = ? and active = true",
             Timestamp.from(Instant.now()), userId);
-        if (updated == 0) throw new NotFoundException("User not found or already inactive.");
-        audit("USER_DEACTIVATED", userId, request.reason().trim());
+        if (updated == 0) throw new NotFoundException("Usuario no encontrado o ya estaba inactivo.");
+        audit.record("app_user", userId, "DEACTIVATE", request.reason().trim());
         return get(userId);
     }
 
@@ -106,21 +146,51 @@ public class UserAccountService {
     public UserAccountResponse reactivate(UUID userId, UserAccountStatusRequest request) {
         int updated = jdbc.update("update app_user set active = true, deactivated_at = null where id = ? and active = false",
             userId);
-        if (updated == 0) throw new NotFoundException("User not found or already active.");
-        audit("USER_REACTIVATED", userId, request.reason().trim());
+        if (updated == 0) throw new NotFoundException("Usuario no encontrado o ya estaba activo.");
+        audit.record("app_user", userId, "ACTIVATE", request.reason().trim());
         return get(userId);
+    }
+
+    @Transactional
+    public void resetPassword(UUID userId, ResetPasswordRequest request) {
+        int updated = jdbc.update("update app_user set password_hash = ? where id = ? and active = true",
+            encoder.encode(request.newPassword()), userId);
+        if (updated == 0) throw new NotFoundException("Usuario no encontrado o inactivo.");
+        // Never write the password (or its hash) to the audit trail.
+        audit.record("app_user", userId, "PASSWORD", "Contraseña restablecida por un administrador.");
+    }
+
+    private void requireNotSelf(UUID userId, String message) {
+        if (userId.equals(context.userId())) throw new ConflictException(message);
+    }
+
+    private boolean isActiveAdmin(UUID userId) {
+        Boolean isAdmin = jdbc.queryForObject("select exists(select 1 from app_user_role ur "
+                + "join role r on r.id = ur.role_id where ur.user_id = ? and r.code = ?)",
+            Boolean.class, userId, ADMIN_ROLE_CODE);
+        return Boolean.TRUE.equals(isAdmin);
+    }
+
+    /** Refuses the change when it would leave the cooperative with no active administrator. */
+    private void requireAnotherActiveAdminRemains(UUID userIdBeingChanged) {
+        Integer otherActiveAdmins = jdbc.queryForObject("select count(distinct u.id) from app_user u "
+                + "join app_user_role ur on ur.user_id = u.id join role r on r.id = ur.role_id "
+                + "where r.code = ? and u.active = true and u.id <> ?", Integer.class, ADMIN_ROLE_CODE, userIdBeingChanged);
+        if (otherActiveAdmins == null || otherActiveAdmins == 0) {
+            throw new BusinessRuleException("Debe quedar al menos un administrador activo.");
+        }
     }
 
     private UserAccountResponse loadAccount(UUID userId) {
         List<UserAccountResponse> accounts = jdbc.query("""
             select u.id, u.username, u.email, p.first_name, p.last_name, p.job_title, p.avatar_url,
                    u.active, u.created_at, u.deactivated_at,
-                   (u.first_name || ' ' || coalesce(p.last_name, '')) as display_name
+                   coalesce(nullif(trim(concat(p.first_name, ' ', coalesce(p.last_name, ''))), ''), u.full_name) as display_name
               from app_user u left join user_profile p on p.user_id = u.id
              where u.id = ?
             """, (rs, n) -> new UserAccountResponse(
                 rs.getObject("id", UUID.class), rs.getString("username"), rs.getString("email"),
-                rs.getString("first_name"), rs.getString("last_name"), rs.getString("display_name").trim(),
+                rs.getString("first_name"), rs.getString("last_name"), rs.getString("display_name"),
                 rs.getString("job_title"), rs.getString("avatar_url"), rs.getBoolean("active"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("deactivated_at") == null ? null : rs.getTimestamp("deactivated_at").toInstant(),
@@ -172,18 +242,12 @@ public class UserAccountService {
     private UUID roleId(String code) {
         return jdbc.query("select id from role where code = ?",
             (rs, n) -> rs.getObject(1, UUID.class), code).stream().findFirst()
-            .orElseThrow(() -> new NotFoundException("Unknown role: " + code));
+            .orElseThrow(() -> new NotFoundException("Rol desconocido: " + code));
     }
 
     private UUID permissionId(String code) {
         return jdbc.query("select id from permission where code = ?",
             (rs, n) -> rs.getObject(1, UUID.class), code).stream().findFirst()
-            .orElseThrow(() -> new NotFoundException("Unknown permission: " + code));
-    }
-
-    private void audit(String action, UUID userId, String reason) {
-        jdbc.update("insert into audit_log(id, entity_name, entity_id, action, author_id, reason, created_at) "
-                + "values (?, 'app_user', ?, ?, ?, ?, ?)",
-            UUID.randomUUID(), userId, action, context.userId(), reason, Timestamp.from(Instant.now()));
+            .orElseThrow(() -> new NotFoundException("Permiso desconocido: " + code));
     }
 }

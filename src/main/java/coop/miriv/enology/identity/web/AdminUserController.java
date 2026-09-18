@@ -2,7 +2,9 @@ package coop.miriv.enology.identity.web;
 
 import coop.miriv.enology.identity.dto.AdminUserResponse;
 import coop.miriv.enology.identity.dto.CreateAdminUserRequest;
+import coop.miriv.enology.identity.dto.PendingWorkResponse;
 import coop.miriv.enology.identity.dto.PermissionGrantRequest;
+import coop.miriv.enology.identity.dto.ResetPasswordRequest;
 import coop.miriv.enology.identity.dto.RoleAssignmentRequest;
 import coop.miriv.enology.identity.dto.UpdateUserCentersRequest;
 import coop.miriv.enology.identity.dto.UserAccountResponse;
@@ -41,8 +43,16 @@ public class AdminUserController {
             @Valid @RequestBody PermissionGrantRequest request) { return accounts.grantPermission(id, request); }
     @DeleteMapping("/accounts/{id}/grants/{grantId}") public UserAccountResponse revokePermission(@PathVariable UUID id,
             @PathVariable UUID grantId) { return accounts.revokePermission(id, grantId); }
+    @GetMapping("/accounts/{id}/pending-work") public PendingWorkResponse pendingWork(@PathVariable UUID id) {
+        return accounts.pendingWork(id);
+    }
     @PostMapping("/accounts/{id}/deactivate") public UserAccountResponse deactivate(@PathVariable UUID id,
             @Valid @RequestBody UserAccountStatusRequest request) { return accounts.deactivate(id, request); }
     @PostMapping("/accounts/{id}/reactivate") public UserAccountResponse reactivate(@PathVariable UUID id,
             @Valid @RequestBody UserAccountStatusRequest request) { return accounts.reactivate(id, request); }
+    @PostMapping("/accounts/{id}/password")
+    @ResponseStatus(org.springframework.http.HttpStatus.NO_CONTENT)
+    public void resetPassword(@PathVariable UUID id, @Valid @RequestBody ResetPasswordRequest request) {
+        accounts.resetPassword(id, request);
+    }
 }

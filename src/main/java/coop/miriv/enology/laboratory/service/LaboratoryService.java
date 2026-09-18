@@ -19,7 +19,6 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -60,6 +59,16 @@ public class LaboratoryService {
         return rows.stream().map(this::response).toList();
     }
 
+    /** F2-07: avoid the N+1 in {@code ContentService.get} by filtering samples at SQL level. */
+    @Transactional(readOnly = true)
+    public List<SampleResponse> listByContent(String contentCode) {
+        List<SampleRow> rows = jdbc.query(SAMPLE_SELECT
+                + " where d.center_id = ? and cu.code = ?" + context.readZoneFilter("d").sql() + " order by s.taken_at desc",
+            (rs, index) -> sampleRow(rs),
+            prependZoneFilter(context.centerId(), context.readZoneFilter("d"), normalize(contentCode)));
+        return rows.stream().map(this::response).toList();
+    }
+
     @Transactional(readOnly = true)
     public SampleResponse get(String code) { return response(find(code, context.centerId())); }
 
@@ -67,14 +76,17 @@ public class LaboratoryService {
     public SampleResponse create(NewSampleRequest request) {
         UUID centerId = context.centerId();
         String code = normalize(request.code());
-        if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from sample where code = ?)", Boolean.class, code))) {
-            throw new ConflictException("A sample with this code already exists.");
-        }
+        // F2-04 idempotency: a sample with the same code, deposit, content and takenAt is a
+        // legitimate retry (e.g. network blip during the lab assistant submit). Return the
+        // existing sample instead of erroring out; only treat it as a real duplicate when
+        // the other identifying fields differ.
+        SampleResponse existing = findByNaturalKey(code, centerId, request);
+        if (existing != null) return existing;
         if (!request.takenDate().equals(request.takenAt().toLocalDate())) {
-            throw new BusinessRuleException("Sampling date and timestamp differ.");
+            throw new BusinessRuleException("La fecha y la hora del muestreo no coinciden.");
         }
         Instant takenAt = request.takenAt().atZone(timezone).toInstant();
-        if (takenAt.isAfter(Instant.now())) throw new BusinessRuleException("Sampling time cannot be in the future.");
+        if (takenAt.isAfter(Instant.now())) throw new BusinessRuleException("La hora del muestreo no puede estar en el futuro.");
         List<OccupationAtTime> occupations = jdbc.query(
             "select o.id, o.content_unit_id, cu.code as content_code, l.code as lot_code "
                 + "from occupation o join deposit d on d.id = o.deposit_id "
@@ -84,14 +96,14 @@ public class LaboratoryService {
             (rs, index) -> new OccupationAtTime(rs.getObject("id", UUID.class),
                 rs.getObject("content_unit_id", UUID.class), rs.getString("content_code"), rs.getString("lot_code")),
             centerId, normalize(request.originDeposit()), Timestamp.from(takenAt), Timestamp.from(takenAt));
-        if (occupations.isEmpty()) throw new BusinessRuleException("No content occupied the deposit at the sampling time.");
+        if (occupations.isEmpty()) throw new BusinessRuleException("Ningún contenido ocupaba el depósito en el momento del muestreo.");
         OccupationAtTime occupation = occupations.getFirst();
         if (!occupation.contentCode().equalsIgnoreCase(request.contentCode())) {
-            throw new BusinessRuleException("Sample content does not match the historical occupation.");
+            throw new BusinessRuleException("El contenido de la muestra no coincide con la ocupación histórica del depósito.");
         }
         if (request.lotCode() != null && !request.lotCode().isBlank()
             && !occupation.lotCode().equalsIgnoreCase(request.lotCode())) {
-            throw new BusinessRuleException("Sample lot does not match the historical occupation.");
+            throw new BusinessRuleException("El lote de la muestra no coincide con la ocupación histórica del depósito.");
         }
         UUID depositId = jdbc.queryForObject("select id from deposit where center_id = ? and code = ?", UUID.class,
             centerId, normalize(request.originDeposit()));
@@ -112,21 +124,21 @@ public class LaboratoryService {
     @Transactional
     public SampleResponse saveResults(String code, ResultsRequest request) {
         SampleRow sample = findForUpdate(code);
-        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Invalidated analysis cannot be edited.");
-        if (sample.status().equals("VALIDATED")) throw new BusinessRuleException("Use correction to change a validated result.");
+        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Un análisis invalidado no se puede editar.");
+        if (sample.status().equals("VALIDATED")) throw new BusinessRuleException("Para cambiar un resultado validado usa la corrección.");
         for (ResultInput input : request.results()) {
             if ((input.value() == null || input.value().isBlank())
                 && (input.qualifier() == null || input.qualifier().isBlank())) continue;
             Parameter parameter = parameter(input.parameter());
             if (!Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from analysis_panel_parameter "
                 + "where panel_id = ? and parameter_id = ?)", Boolean.class, sample.panelId(), parameter.id()))) {
-                throw new BusinessRuleException("Parameter is not part of the selected panel: " + input.parameter());
+                throw new BusinessRuleException("El parámetro no forma parte del panel seleccionado: " + input.parameter());
             }
             Qualifier qualifier = qualifier(input.qualifier());
             BigDecimal value = qualifier.code().equals("NONE") ? decimal(input.value()) : null;
             BigDecimal limit = qualifier.code().equals("LESS_THAN") ? decimal(input.limit()) : null;
             if (qualifier.code().equals("LESS_THAN") && limit.signum() <= 0) {
-                throw new BusinessRuleException("Quantification limit must be positive.");
+                throw new BusinessRuleException("El límite de cuantificación debe ser positivo.");
             }
             List<UUID> previous = jdbc.query("select id from result where analysis_id = ? and parameter_id = ? and is_current = true for update",
                 (rs, index) -> rs.getObject(1, UUID.class), sample.analysisId(), parameter.id());
@@ -141,7 +153,7 @@ public class LaboratoryService {
         int completed = completed(sample.analysisId());
         int required = required(sample.panelId());
         boolean send = request.status().equals("Pendiente validar");
-        if (!send && !request.status().equals("Borrador")) throw new BusinessRuleException("Unsupported analysis status.");
+        if (!send && !request.status().equals("Borrador")) throw new BusinessRuleException("Estado de análisis no soportado.");
         int completedRequired = completedRequired(sample.analysisId(), sample.panelId());
         String status = send && completedRequired >= required ? "PENDING_VALIDATION" : completed > 0 ? "PARTIAL" : "DRAFT";
         jdbc.update("update analysis set processed_at = ?, laboratory_name = ?, equipment = ?, method_description = ?, "
@@ -155,13 +167,13 @@ public class LaboratoryService {
     @Transactional
     public SampleResponse validate(String code, String note) {
         SampleRow sample = findForUpdate(code);
-        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Invalidated analysis cannot be validated.");
+        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Un análisis invalidado no se puede validar.");
         if (sample.status().equals("DRAFT") || sample.status().equals("PARTIAL")) throw new BusinessRuleException("Análisis en borrador: complétalo antes de validarlo.");
         int required = required(sample.panelId());
         int completedRequired = completedRequired(sample.analysisId(), sample.panelId());
         if (completedRequired < required) {
-            throw new org.springframework.web.server.ResponseStatusException(org.springframework.http.HttpStatus.CONFLICT,
-                "Mandatory parameters are missing: " + (required - completedRequired) + " pendiente(s).");
+            throw new BusinessRuleException("MISSING_REQUIRED_PARAMETERS",
+                "Faltan parámetros obligatorios: " + (required - completedRequired) + " pendiente(s).");
         }
         UUID actor = actorId();
         jdbc.update("update analysis set status = 'VALIDATED'::analysis_status, validated_at = now(), "
@@ -174,12 +186,12 @@ public class LaboratoryService {
     @Transactional
     public SampleResponse correct(String code, String parameterName, CorrectionRequest request) {
         SampleRow sample = findForUpdate(code);
-        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Invalidated analysis cannot be corrected.");
+        if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Un análisis invalidado no se puede corregir.");
         Parameter parameter = parameter(parameterName);
         List<UUID> current = jdbc.query("select id from result where analysis_id = ? and parameter_id = ? "
                 + "and is_current = true for update", (rs, index) -> rs.getObject(1, UUID.class),
             sample.analysisId(), parameter.id());
-        if (current.isEmpty()) throw new NotFoundException("Current result not found.");
+        if (current.isEmpty()) throw new NotFoundException("Resultado actual no encontrado.");
         UUID prior = current.getFirst();
         jdbc.update("update result set is_current = false where id = ?", prior);
         jdbc.update("insert into result(id, analysis_id, parameter_id, qualifier, numeric_value, qualifier_limit, "
@@ -226,11 +238,10 @@ public class LaboratoryService {
                 + "where o.content_unit_id = ? and o.end_at is null limit 1",
             (rs, index) -> rs.getString(1), row.contentId()).stream().findFirst().orElse(row.originDeposit());
         LocalDate takenDate = row.takenAt().atZone(timezone).toLocalDate();
-        long days = ChronoUnit.DAYS.between(takenDate, LocalDate.now(timezone));
-        String age = days == 0 ? "today" : days == 1 ? "yesterday" : days + " days ago";
+        // F2-03: age is computed client-side via formatRelative(takenAt) instead of a server-side string.
         return new SampleResponse(row.code(), row.originDeposit(), currentDeposit, row.contentCode(), row.lotCode(),
-            row.category() == null ? "" : row.category(), row.takenAt().atZone(timezone).toLocalDateTime().toString(),
-            takenDate, age, panelName(row.panelCode()), completedRequired(row.analysisId(), row.panelId()), required(row.panelId()), status,
+            row.category(), row.takenAt().atZone(timezone).toLocalDateTime().toString(),
+            takenDate, null, panelName(row.panelCode()), completedRequired(row.analysisId(), row.panelId()), required(row.panelId()), status,
             row.responsible(), false, panelParameters, results, row.observations(),
             row.processedAt() == null ? null : row.processedAt().atZone(timezone).toLocalDate(),
             row.laboratory(), row.equipment(), row.method(), row.validationNote());
@@ -262,10 +273,32 @@ public class LaboratoryService {
             rs.getString("method_description"), versions);
     }
 
+    /**
+     * F2-04: if a sample with the same code, deposit, content and takenAt already exists,
+     * return it instead of creating a duplicate. A truly different sample carrying the
+     * same code is still surfaced as a {@code DUPLICATE_CODE} conflict.
+     *
+     * Deliberately NOT scoped by {@link CurrentUserContext#readZoneFilter}: {@code sample.code}
+     * is unique for the whole center regardless of zone, so this must see every zone or a
+     * duplicate the caller cannot read would fall through to a generic constraint-violation 409
+     * on insert instead of the specific {@code DUPLICATE_CODE} conflict.
+     */
+    private SampleResponse findByNaturalKey(String code, UUID centerId, NewSampleRequest request) {
+        List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ? and s.code = ?",
+            (rs, index) -> sampleRow(rs), centerId, code);
+        if (rows.isEmpty()) return null;
+        SampleRow existing = rows.getFirst();
+        boolean sameDeposit = existing.originDeposit().equalsIgnoreCase(normalize(request.originDeposit()));
+        boolean sameContent = existing.contentCode().equalsIgnoreCase(request.contentCode());
+        boolean sameTakenAt = existing.takenAt().equals(request.takenAt().atZone(timezone).toInstant());
+        if (sameDeposit && sameContent && sameTakenAt) return response(existing);
+        throw new ConflictException("DUPLICATE_CODE", "Ya existe una muestra con ese código.");
+    }
+
     private SampleRow find(String code, UUID centerId) {
         List<SampleRow> rows = jdbc.query(SAMPLE_SELECT + " where d.center_id = ? and s.code = ?" + context.readZoneFilter("d").sql(),
-            (rs, index) -> sampleRow(rs), prependZoneFilter(centerId, context.readZoneFilter("d")), normalize(code));
-        if (rows.isEmpty()) throw new NotFoundException("Sample not found.");
+            (rs, index) -> sampleRow(rs), prependZoneFilter(centerId, context.readZoneFilter("d"), normalize(code)));
+        if (rows.isEmpty()) throw new NotFoundException("Muestra no encontrada.");
         return rows.getFirst();
     }
 
@@ -274,7 +307,7 @@ public class LaboratoryService {
         List<UUID> ids = jdbc.query("select a.id from analysis a join sample s on s.id = a.sample_id "
                 + "join deposit d on d.id = s.deposit_id_at_sampling where d.center_id = ? and s.code = ? "
                 + "for update of a", (rs, index) -> rs.getObject(1, UUID.class), centerId, normalize(code));
-        if (ids.isEmpty()) throw new NotFoundException("Sample not found.");
+        if (ids.isEmpty()) throw new NotFoundException("Muestra no encontrada.");
         return find(code, centerId);
     }
 
@@ -294,7 +327,7 @@ public class LaboratoryService {
         List<Parameter> rows = jdbc.query("select id, code from parameter where lower(name) = lower(?) "
                 + "or lower(code) = lower(?)", (rs, index) -> new Parameter(rs.getObject(1, UUID.class), rs.getString(2)),
             value.trim(), code.trim());
-        if (rows.isEmpty()) throw new NotFoundException("Parameter not found: " + value);
+        if (rows.isEmpty()) throw new NotFoundException("Parámetro no encontrado: " + value);
         return rows.getFirst();
     }
 
@@ -308,7 +341,7 @@ public class LaboratoryService {
         };
         List<UUID> ids = jdbc.query("select id from analysis_panel where code = ?",
             (rs, index) -> rs.getObject(1, UUID.class), code);
-        if (ids.isEmpty()) throw new NotFoundException("Analysis panel not found.");
+        if (ids.isEmpty()) throw new NotFoundException("Panel de análisis no encontrado.");
         return ids.getFirst();
     }
 
@@ -348,17 +381,31 @@ public class LaboratoryService {
 
     private UUID actorId() { return context.userId(); }
 
-    private static Object[] prependZoneFilter(UUID centerId, CurrentUserContext.ZoneFilter filter) {
+    /**
+     * Builds the full parameter array for a query shaped as
+     * {@code "... where d.center_id = ? and <other ordinary conditions with their own ?> "
+     * + context.readZoneFilter("d").sql()}: {@code centerId}, then {@code middleParams} in the
+     * same order as their {@code ?} placeholders appear in the SQL text, then the zone ids last
+     * — because {@code readZoneFilter(...).sql()} is always appended at the very end of the
+     * WHERE clause, so its own {@code ?} placeholders come after every other one.
+     *
+     * Passing the zone ids and the trailing params as two separate varargs to
+     * {@code jdbc.query(...)} (instead of through one merged array) makes the JDBC driver try to
+     * bind the whole {@code Object[]} as a single SQL parameter and fail with "Cannot cast an
+     * instance of [Ljava.lang.Object; to type Types.ARRAY" — always merge here, in this order.
+     */
+    private static Object[] prependZoneFilter(UUID centerId, CurrentUserContext.ZoneFilter filter, Object... middleParams) {
         java.util.List<Object> params = new java.util.ArrayList<>();
         params.add(centerId);
+        params.addAll(java.util.Arrays.asList(middleParams));
         params.addAll(filter.zoneIds());
         return params.toArray();
     }
 
     private BigDecimal decimal(String raw) {
-        if (raw == null || raw.isBlank()) throw new BusinessRuleException("Numeric value or limit is required.");
+        if (raw == null || raw.isBlank()) throw new BusinessRuleException("Es obligatorio un valor numérico o un límite.");
         try { return new BigDecimal(raw.trim().replace(',', '.')); }
-        catch (NumberFormatException exception) { throw new BusinessRuleException("Invalid numeric value: " + raw); }
+        catch (NumberFormatException exception) { throw new BusinessRuleException("Valor numérico no válido: " + raw); }
     }
 
     private Qualifier qualifier(String value) {
@@ -367,7 +414,7 @@ public class LaboratoryService {
             case "Menor que límite" -> new Qualifier("LESS_THAN");
             case "No medido" -> new Qualifier("NOT_MEASURED");
             case "No detectado" -> new Qualifier("NOT_DETECTED");
-            default -> throw new BusinessRuleException("Unsupported result qualifier.");
+            default -> throw new BusinessRuleException("Calificador de resultado no soportado.");
         };
     }
 

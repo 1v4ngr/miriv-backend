@@ -30,7 +30,7 @@ public class AppUserDetailsService implements UserDetailsService {
     public UserDetails loadUserByUsername(String username) {
         AppUser user = appUserRepository.findByUsernameAndActiveTrue(username)
             .or(() -> appUserRepository.findByEmailIgnoreCaseAndActiveTrue(username))
-            .orElseThrow(() -> new UsernameNotFoundException("Unknown or inactive user: " + username));
+            .orElseThrow(() -> new UsernameNotFoundException("Usuario desconocido o inactivo: " + username));
         return loadWithPermissions(user);
     }
 

@@ -66,7 +66,7 @@ public class CurrentUserProfileService {
                     rs.getString("username"), rs.getString("email"), rs.getString("first_name"),
                     rs.getString("last_name"), rs.getString("avatar_url"), rs.getString("job_title"),
                     rs.getString("center_code"), rs.getString("center_name")), userId);
-        if (rows.isEmpty()) throw new NotFoundException("Current user profile not found.");
+        if (rows.isEmpty()) throw new NotFoundException("Perfil del usuario actual no encontrado.");
         ProfileRow profile = rows.getFirst();
         List<String> zones = jdbc.query("select distinct z.name from zone z where z.center_id = (select center_id from app_user where id = ?) order by z.name",
             (rs, row) -> rs.getString(1), userId);
@@ -112,7 +112,7 @@ public class CurrentUserProfileService {
             StringUtils.hasText(request.jobTitle()) ? request.jobTitle().trim() : null,
             StringUtils.hasText(request.avatarUrl()) ? request.avatarUrl().trim() : null,
             userId);
-        if (updated == 0) throw new NotFoundException("Current user profile not found.");
+        if (updated == 0) throw new NotFoundException("Perfil del usuario actual no encontrado.");
 
         if (StringUtils.hasText(request.centerCode())) {
             List<UUID> centerIds = jdbc.query("select c.id from center c "

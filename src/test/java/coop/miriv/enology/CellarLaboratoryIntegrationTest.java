@@ -15,6 +15,7 @@ import coop.miriv.enology.cellar.service.MovementService;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.dashboard.service.WorkHomeService;
 import coop.miriv.enology.identity.repository.AppUserRepository;
+import coop.miriv.enology.identity.service.AppUserDetailsService;
 import coop.miriv.enology.identity.service.AppUserPrincipal;
 import coop.miriv.enology.incident.dto.ResolveIncidentRequest;
 import coop.miriv.enology.incident.service.IncidentService;
@@ -56,6 +57,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
     private static final ZoneId TIMEZONE = ZoneId.of("Europe/Madrid");
 
     @Autowired AppUserRepository users;
+    @Autowired AppUserDetailsService userDetailsService;
     @Autowired DepositService deposits;
     @Autowired DepositCleaningService cleaning;
     @Autowired LotService lots;
@@ -70,7 +72,9 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
 
     @BeforeEach
     void authenticate() {
-        AppUserPrincipal principal = new AppUserPrincipal(users.findByUsernameAndActiveTrue("enologo").orElseThrow());
+        // F1C-04: build the principal through the real detail service so it carries the actual
+        // permission/zone scope from the seed, not an "everything allowed" stand-in.
+        AppUserPrincipal principal = (AppUserPrincipal) userDetailsService.loadUserByUsername("enologo");
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
             principal, null, principal.getAuthorities()));
     }
@@ -92,7 +96,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         LocalDateTime movementTime = LocalDateTime.now(TIMEZONE).minusHours(1);
         var movement = movements.register(new MovementRequest("Trasiego", movementTime.toLocalDate(),
             movementTime.toLocalTime().withNano(0), "enologo", "Routine transfer", source, target,
-            new BigDecimal("300"), new BigDecimal("10"), "test-" + suffix, false));
+            new BigDecimal("300"), new BigDecimal("10"), "test-" + suffix, false, null, null));
         assertEquals(0, movement.sourceFinalLiters().compareTo(new BigDecimal("690")));
         assertEquals(0, movement.destinationFinalLiters().compareTo(new BigDecimal("300")));
         var transferred = deposits.get(target);
@@ -155,7 +159,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         LocalDateTime exitTime = LocalDateTime.now(TIMEZONE).minusMinutes(20);
         movements.register(new MovementRequest("Salida", exitTime.toLocalDate(),
             exitTime.toLocalTime().withNano(0), "enologo", "Final dispatch", source, null,
-            new BigDecimal("690"), BigDecimal.ZERO, "exit-" + suffix, false));
+            new BigDecimal("690"), BigDecimal.ZERO, "exit-" + suffix, false, null, null));
         cleaning.start(source);
         cleaning.complete(source, new CompleteCleaningRequest("Wash and inspect", "Passed", "No residue", true));
         var corrected = laboratory.correct(sampleCode, "pH", new CorrectionRequest("3,40", "Instrument calibration"));

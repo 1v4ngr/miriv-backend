@@ -1,5 +1,6 @@
 package coop.miriv.enology.cellar.service;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.cellar.dto.CleaningRecordResponse;
 import coop.miriv.enology.cellar.dto.DepositRequest;
 import coop.miriv.enology.cellar.dto.DepositResponse;
@@ -35,14 +36,16 @@ public class DepositService {
     private final ZoneRepository zones;
     private final CurrentUserContext context;
     private final JdbcTemplate jdbc;
+    private final AuditService audit;
 
     public DepositService(DepositRepository deposits, DepositReadRepository readRepository,
-                          ZoneRepository zones, CurrentUserContext context, JdbcTemplate jdbc) {
+                          ZoneRepository zones, CurrentUserContext context, JdbcTemplate jdbc, AuditService audit) {
         this.deposits = deposits;
         this.readRepository = readRepository;
         this.zones = zones;
         this.context = context;
         this.jdbc = jdbc;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -63,9 +66,13 @@ public class DepositService {
         Deposit deposit = deposits.findByCenter_IdAndCodeIgnoreCase(centerId, normalize(code))
             .filter(Deposit::isActive)
             .filter(item -> context.canRead(item.getZone() == null ? null : item.getZone().getId()))
-            .orElseThrow(() -> new NotFoundException("Deposit not found."));
-        return response(deposit, readRepository.occupationsByCenter(centerId),
-            readRepository.cleaningByCenter(centerId));
+            .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
+        // F2-07: read just this deposit's occupations and cleaning rows instead of loading
+        // the whole center. The list view still uses the by-center versions because it
+        // already iterates every deposit in memory anyway.
+        return response(deposit,
+            Map.of(deposit.getId(), readRepository.occupationsByDeposit(deposit.getId())),
+            Map.of(deposit.getId(), readRepository.cleaningByDeposit(deposit.getId())));
     }
 
     @Transactional
@@ -73,13 +80,13 @@ public class DepositService {
         Center center = context.center();
         if (!request.center().equalsIgnoreCase(center.getCode())
             && !request.center().equalsIgnoreCase(center.getName())) {
-            throw new AccessDeniedException("The requested center is outside your scope.");
+            throw new AccessDeniedException("El centro solicitado está fuera de tu ámbito.");
         }
         Zone zone = resolveZone(center.getId(), request.zone());
         context.requireInZone("DEPOSIT_MANAGE", zone.getId());
         String code = normalize(request.code());
         if (deposits.existsByCenter_IdAndCodeIgnoreCase(center.getId(), code)) {
-            throw new ConflictException("A deposit with this code already exists in the center.");
+            throw new ConflictException("DUPLICATE_CODE", "Ya existe un depósito con ese código en el centro.");
         }
         Deposit deposit = new Deposit();
         deposit.setCode(code);
@@ -91,6 +98,8 @@ public class DepositService {
         deposit.setRefrigerated(request.refrigerated());
         deposit.setStatus(DepositStatus.AVAILABLE);
         deposits.saveAndFlush(deposit);
+        audit.record("deposit", deposit.getId(), "DEPOSIT_CREATED",
+            "Depósito " + deposit.getCode() + " creado en zona " + zone.getCode());
         return response(deposit, Map.of(), Map.of());
     }
 
@@ -99,13 +108,13 @@ public class DepositService {
         Center center = context.center();
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
-            .orElseThrow(() -> new NotFoundException("Deposit not found."));
+            .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
         context.requireInZone("DEPOSIT_MANAGE", deposit.getZone().getId());
         Zone zone = resolveZone(center.getId(), request.zone());
         context.requireInZone("DEPOSIT_MANAGE", zone.getId());
         BigDecimal occupied = readRepository.activeVolume(deposit.getId());
         if (request.capacityLiters().compareTo(occupied) < 0) {
-            throw new BusinessRuleException("Useful capacity cannot be lower than occupied volume.");
+            throw new BusinessRuleException("La capacidad útil no puede ser inferior al volumen ocupado.");
         }
         deposit.setZone(zone);
         deposit.setPosition(request.position());
@@ -131,6 +140,7 @@ public class DepositService {
         deposit.setActive(false);
         deposit.setUpdatedAt(Instant.now());
         deposits.saveAndFlush(deposit);
+        audit.record("deposit", deposit.getId(), "DEPOSIT_DEACTIVATED", "Depósito " + deposit.getCode() + " desactivado");
         return response(deposit, Map.of(), Map.of());
     }
 
@@ -139,10 +149,10 @@ public class DepositService {
                                      Map<UUID, List<CleaningRecordResponse>> cleaning) {
         String status = deposit.getStatus().name().toLowerCase(Locale.ROOT);
         return new DepositResponse(deposit.getId(), deposit.getCode(), deposit.getCenter().getName(),
-            deposit.getZone() == null ? "Unassigned" : deposit.getZone().getName(),
+            deposit.getZone() == null ? null : deposit.getZone().getName(),
             deposit.getPosition() == null ? "" : deposit.getPosition(),
             deposit.getUsefulCapacityLiters(), deposit.getNominalCapacityLiters(), deposit.getMaterial(),
-            deposit.isRefrigerated(), status, "none",
+            deposit.isRefrigerated(), status, "NONE",
             occupations.getOrDefault(deposit.getId(), List.of()),
             cleaning.getOrDefault(deposit.getId(), List.of()));
     }
@@ -150,7 +160,7 @@ public class DepositService {
     private Zone resolveZone(UUID centerId, String value) {
         return zones.findByCenter_IdAndCodeIgnoreCase(centerId, value.trim())
             .or(() -> zones.findByCenter_IdAndNameIgnoreCase(centerId, value.trim()))
-            .orElseThrow(() -> new NotFoundException("Zone not found in the current center."));
+            .orElseThrow(() -> new NotFoundException("Zona no encontrada en el centro actual."));
     }
 
     private String normalize(String code) {

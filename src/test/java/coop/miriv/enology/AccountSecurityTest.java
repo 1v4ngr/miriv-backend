@@ -8,6 +8,7 @@ import coop.miriv.enology.identity.dto.CenterOption;
 import coop.miriv.enology.identity.dto.CurrentUserProfileResponse;
 import coop.miriv.enology.identity.dto.UpdateProfileRequest;
 import coop.miriv.enology.identity.repository.AppUserRepository;
+import coop.miriv.enology.identity.service.AppUserDetailsService;
 import coop.miriv.enology.identity.service.AppUserPrincipal;
 import coop.miriv.enology.identity.service.CurrentUserProfileService;
 import coop.miriv.enology.support.IntegrationTest;
@@ -27,10 +28,11 @@ class AccountSecurityTest extends IntegrationTest {
     @Autowired CurrentUserProfileService profileService;
     @Autowired JdbcTemplate jdbc;
     @Autowired AppUserRepository users;
+    @Autowired AppUserDetailsService userDetailsService;
 
     @BeforeEach
     void authenticate() {
-        AppUserPrincipal principal = new AppUserPrincipal(users.findByUsernameAndActiveTrue("enologo").orElseThrow());
+        AppUserPrincipal principal = (AppUserPrincipal) userDetailsService.loadUserByUsername("enologo");
         SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
             principal, null, principal.getAuthorities()));
     }

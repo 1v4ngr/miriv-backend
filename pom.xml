@@ -97,6 +97,12 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <!-- Boot 4 split MockMvc's @AutoConfigureMockMvc out of spring-boot-test-autoconfigure. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-webmvc-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>

@@ -1,5 +1,6 @@
 package coop.miriv.enology.cellar.service;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.cellar.dto.MovementRequest;
 import coop.miriv.enology.cellar.dto.MovementResponse;
 import coop.miriv.enology.common.CodeGenerator;
@@ -19,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -30,12 +32,16 @@ public class MovementService {
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
     private final ZoneId timezone;
+    private final CodeGenerator codes;
+    private final AuditService audit;
 
     public MovementService(JdbcTemplate jdbc, CurrentUserContext context,
-                           @Value("${app.timezone}") String timezone) {
+                           @Value("${app.timezone}") String timezone, CodeGenerator codes, AuditService audit) {
         this.jdbc = jdbc;
         this.context = context;
         this.timezone = ZoneId.of(timezone);
+        this.codes = codes;
+        this.audit = audit;
     }
 
     @Transactional
@@ -131,7 +137,7 @@ public class MovementService {
         }
         UUID responsibleId = responsibleId(request.responsible(), centerId);
         UUID movementId = UUID.randomUUID();
-        String movementCode = code("MOV", request.effectiveDate().getYear(), movementId);
+        String movementCode = codes.next("MOV", request.effectiveDate().getYear());
         boolean mixture = destinationUnit != null;
         String movementType = exit ? "EXIT" : mixture ? "MIX" : withdrawn.compareTo(sourceUnit.volume()) == 0 ? "TRANSFER_FULL" : "TRANSFER_PARTIAL";
         jdbc.update("insert into movement(id, code, type, status, effective_at, responsible_id, reason, idempotency_key) "
@@ -154,7 +160,7 @@ public class MovementService {
         if (destination != null) {
             if (mixture) {
                 UUID newLotId = UUID.randomUUID();
-                String newLotCode = code("MIX", request.effectiveDate().getYear(), newLotId);
+                String newLotCode = codes.next("MIX", request.effectiveDate().getYear());
                 jdbc.update("insert into lot(id, code, center_id, campaign, entry_date, responsible_id, origin_summary) "
                         + "values (?, ?, ?, ?, ?, ?, ?)", newLotId, newLotCode, centerId,
                     request.effectiveDate().getYear(), request.effectiveDate(), responsibleId,
@@ -162,7 +168,7 @@ public class MovementService {
                 jdbc.update("update occupation set end_at = ? where id = ?", Timestamp.from(effectiveAt), destinationUnit.occupationId());
                 jdbc.update("update content_unit set active = false where id = ?", destinationUnit.contentId());
                 resultContentId = UUID.randomUUID();
-                resultContentCode = code("C", request.effectiveDate().getYear(), resultContentId);
+                resultContentCode = codes.next("C", request.effectiveDate().getYear());
                 jdbc.update("insert into content_unit(id, code, lot_id, volume_liters) values (?, ?, ?, ?)",
                     resultContentId, resultContentCode, newLotId, destinationFinal);
                 lineage(resultContentId, sourceUnit.contentId(), movementId, request.volumeLiters());
@@ -174,7 +180,7 @@ public class MovementService {
                     request.volumeLiters(), resultContentId);
             } else {
                 resultContentId = UUID.randomUUID();
-                resultContentCode = code("C", request.effectiveDate().getYear(), resultContentId);
+                resultContentCode = codes.next("C", request.effectiveDate().getYear());
                 jdbc.update("insert into content_unit(id, code, lot_id, category_id, color_id, volume_liters) "
                         + "select ?, ?, lot_id, category_id, color_id, ? from content_unit where id = ?",
                     resultContentId, resultContentCode, request.volumeLiters(), sourceUnit.contentId());
@@ -194,6 +200,10 @@ public class MovementService {
                 UUID.randomUUID(), movementId, destinationUnit.contentId(), destination.id(), resultContentId,
                 destination.id(), destinationUnit.volume());
         }
+        // F2-01: record the audit row in the same transaction so a rollback removes it too.
+        audit.record("movement", movementId, "MOVEMENT_REGISTERED",
+            movementType + " · " + source.code() + " → " + (destination == null ? "salida" : destination.code())
+                + " · " + request.volumeLiters() + " L · motivo: " + request.reason().trim());
         return new MovementResponse(movementCode, mixture, sourceFinal, resultContentCode, destinationFinal);
     }
 
@@ -224,7 +234,7 @@ public class MovementService {
         UUID responsiblePk = responsibleId(responsible, centerId);
         Instant effectiveAt = Instant.now();
         UUID movementId = UUID.randomUUID();
-        String movementCode = code("MOV", LocalDate.now(timezone).getYear(), movementId);
+        String movementCode = codes.next("MOV", LocalDate.now(timezone).getYear());
         String trimmedReason = reason == null || reason.isBlank() ? "Corrección manual" : reason.trim();
         jdbc.update("insert into movement(id, code, type, status, effective_at, responsible_id, reason) "
                 + "values (?, ?, 'LOSS'::movement_type, 'EXECUTED'::movement_status, ?, ?, ?)",
@@ -234,6 +244,8 @@ public class MovementService {
         jdbc.update("update occupation set end_at = ?, volume_liters = 0 where id = ?", Timestamp.from(effectiveAt), sourceUnit.occupationId());
         jdbc.update("update content_unit set volume_liters = 0, active = false where id = ?", sourceUnit.contentId());
         jdbc.update("update deposit set status = 'PENDING_CLEANING'::deposit_status, updated_at = now() where id = ?", source.id());
+        audit.record("movement", movementId, "MOVEMENT_CLEARED",
+            "Corrección manual: contenido de " + source.code() + " retirado (" + sourceUnit.volume() + " L).");
     }
 
     /** F2-04: return the original {@link MovementResponse} for a previously used idempotency key. */
@@ -287,10 +299,6 @@ public class MovementService {
             (rs, index) -> rs.getObject(1, UUID.class), centerId, value.trim(), value.trim());
         if (ids.isEmpty()) throw new NotFoundException("Responsable no encontrado en el centro actual: " + value);
         return ids.getFirst();
-    }
-
-    private String code(String prefix, int year, UUID id) {
-        return prefix + "-" + year + "-" + id.toString().substring(0, 8).toUpperCase(Locale.ROOT);
     }
 
     private String normalize(String value) { return value.trim().toUpperCase(Locale.ROOT).replaceAll("\\s+", ""); }

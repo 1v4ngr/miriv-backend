@@ -46,7 +46,7 @@ public class IncidentService {
         List<IncidentResponse> rows = jdbc.query(INCIDENT_SELECT
                 + " where coalesce(d.center_id, l.center_id) = ? and i.code = ?",
             (rs, index) -> response(rs), context.centerId(), normalize(code));
-        if (rows.isEmpty()) throw new NotFoundException("Incident not found.");
+        if (rows.isEmpty()) throw new NotFoundException("Incidencia no encontrada.");
         return rows.getFirst();
     }
 
@@ -57,7 +57,7 @@ public class IncidentService {
         if (incident.status().equals("NEW") || incident.status().equals("ASSIGNED")) {
             jdbc.update("update incident set status = 'IN_REVIEW'::incident_status where id = ?", incident.id());
         }
-        event(incident.id(), "ACKNOWLEDGED", "Incident reviewed by user.");
+        event(incident.id(), "ACKNOWLEDGED", "Incidencia revisada por el usuario.");
         return get(code);
     }
 
@@ -68,7 +68,7 @@ public class IncidentService {
         UUID responsibleId = responsibleId(responsible, context.centerId());
         jdbc.update("update incident set responsible_id = ?, status = 'ASSIGNED'::incident_status where id = ?",
             responsibleId, incident.id());
-        event(incident.id(), "ASSIGNED", "Assigned to " + responsible.trim());
+        event(incident.id(), "ASSIGNED", "Asignada a " + responsible.trim());
         return get(code);
     }
 
@@ -76,9 +76,19 @@ public class IncidentService {
     public IncidentResponse silence(String code, Instant until, String reason) {
         LockedIncident incident = lock(code);
         requireOpen(incident);
-        if (!until.isAfter(Instant.now())) throw new BusinessRuleException("Silence end must be in the future.");
+        if (!until.isAfter(Instant.now())) throw new BusinessRuleException("El fin del silencio debe estar en el futuro.");
         jdbc.update("update incident set silenced_until = ? where id = ?", Timestamp.from(until), incident.id());
-        event(incident.id(), "SILENCED", reason.trim() + " until " + until);
+        event(incident.id(), "SILENCED", reason.trim() + " hasta " + until);
+        return get(code);
+    }
+
+    /** F2-01 helper: reactivate a previously silenced incident (clears {@code silenced_until}). */
+    @Transactional
+    public IncidentResponse unsilence(String code) {
+        LockedIncident incident = lock(code);
+        requireOpen(incident);
+        jdbc.update("update incident set silenced_until = null where id = ?", incident.id());
+        event(incident.id(), "UNSILENCED", "Avisos reactivados por el usuario.");
         return get(code);
     }
 
@@ -89,7 +99,7 @@ public class IncidentService {
         String reason = request.reason().trim();
         if (discard) {
             if (!DISCARD_CATEGORIES.contains(request.discardCategory())) {
-                throw new BusinessRuleException("Discard category must identify a data error, false positive or expected condition.");
+                throw new BusinessRuleException("La categoría de descarte debe identificar un error de datos, un falso positivo o una condición esperada.");
             }
             reason = request.discardCategory() + ": " + reason;
         }
@@ -127,13 +137,13 @@ public class IncidentService {
                 + "where coalesce(d.center_id, l.center_id) = ? and i.code = ? for update of i",
             (rs, index) -> new LockedIncident(rs.getObject("id", UUID.class), rs.getString("status")),
             context.centerId(), normalize(code));
-        if (rows.isEmpty()) throw new NotFoundException("Incident not found.");
+        if (rows.isEmpty()) throw new NotFoundException("Incidencia no encontrada.");
         return rows.getFirst();
     }
 
     private void requireOpen(LockedIncident incident) {
         if (incident.status().equals("RESOLVED") || incident.status().equals("DISCARDED")) {
-            throw new BusinessRuleException("Closed incident cannot be changed.");
+            throw new BusinessRuleException("Una incidencia cerrada no se puede modificar.");
         }
     }
 

@@ -30,8 +30,8 @@ public class DefaultCredentialsGuard implements ApplicationRunner {
             .map(user -> user[0])
             .toList();
         if (!exposed.isEmpty()) {
-            throw new IllegalStateException("Accounts still use the sample password: " + exposed
-                + ". Change their password or deactivate them before starting in this environment.");
+            throw new IllegalStateException("Algunas cuentas siguen usando la contraseña de ejemplo: " + exposed
+                + ". Cambia su contraseña o desactívalas antes de arrancar en este entorno.");
         }
     }
 }

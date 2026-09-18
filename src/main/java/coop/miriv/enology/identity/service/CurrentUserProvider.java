@@ -19,6 +19,6 @@ public class CurrentUserProvider {
     }
 
     public UUID requireCurrentUserId() {
-        return currentUserId().orElseThrow(() -> new IllegalStateException("No authenticated user in context."));
+        return currentUserId().orElseThrow(() -> new IllegalStateException("No hay un usuario autenticado en el contexto."));
     }
 }

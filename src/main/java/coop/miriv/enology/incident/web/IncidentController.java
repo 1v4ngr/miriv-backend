@@ -41,6 +41,11 @@ public class IncidentController {
         return service.silence(code, request.until(), request.reason());
     }
 
+    @PostMapping("/{code}/unsilence")
+    public IncidentResponse unsilence(@PathVariable String code) {
+        return service.unsilence(code);
+    }
+
     @PostMapping("/{code}/resolve")
     public IncidentResponse resolve(@PathVariable String code, @Valid @RequestBody ResolveIncidentRequest request) {
         return service.close(code, request, false);

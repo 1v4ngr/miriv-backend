@@ -1,4 +1,6 @@
 package coop.miriv.enology.identity.service;
+
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.dto.CenterAdminRequest;
@@ -13,9 +15,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class CenterAdminService {
 
     private final JdbcTemplate jdbc;
+    private final AuditService audit;
 
-    public CenterAdminService(JdbcTemplate jdbc) {
+    public CenterAdminService(JdbcTemplate jdbc, AuditService audit) {
         this.jdbc = jdbc;
+        this.audit = audit;
     }
 
     public List<CenterOption> list() {
@@ -25,19 +29,25 @@ public class CenterAdminService {
 
     @Transactional
     public CenterOption create(CenterAdminRequest r) {
+        String code = r.code().trim().toUpperCase();
         try {
-            jdbc.update("insert into center(code, name) values(?, ?)", r.code().trim().toUpperCase(), r.name().trim());
+            UUID id = UUID.randomUUID();
+            jdbc.update("insert into center(id, code, name) values(?, ?, ?)", id, code, r.name().trim());
+            audit.record("center", id, "CENTER_CREATED", code);
         } catch (org.springframework.dao.DataIntegrityViolationException e) {
-            throw new ConflictException("Center code already exists.");
+            throw new ConflictException("DUPLICATE_CODE", "Ya existe un centro con ese código.");
         }
-        return new CenterOption(r.code().trim().toUpperCase(), r.name().trim());
+        return new CenterOption(code, r.name().trim());
     }
 
     @Transactional
     public CenterOption update(String code, CenterAdminRequest r) {
-        int n = jdbc.update("update center set code = ?, name = ? where code = ?",
-            r.code().trim().toUpperCase(), r.name().trim(), code);
-        if (n == 0) throw new NotFoundException("Center not found.");
+        UUID id = jdbc.query("select id from center where code = ?",
+            (rs, n) -> rs.getObject(1, UUID.class), code).stream().findFirst()
+            .orElseThrow(() -> new NotFoundException("Centro no encontrado."));
+        jdbc.update("update center set code = ?, name = ? where id = ?",
+            r.code().trim().toUpperCase(), r.name().trim(), id);
+        audit.record("center", id, "CENTER_UPDATED", "Renombrado a " + r.name().trim());
         return new CenterOption(r.code().trim().toUpperCase(), r.name().trim());
     }
 
@@ -45,11 +55,12 @@ public class CenterAdminService {
     public void delete(String code) {
         UUID id = jdbc.query("select id from center where code = ?",
             (rs, n) -> rs.getObject(1, UUID.class), code).stream().findFirst()
-            .orElseThrow(() -> new NotFoundException("Center not found."));
+            .orElseThrow(() -> new NotFoundException("Centro no encontrado."));
         Integer refs = jdbc.queryForObject("select (select count(*) from app_user where center_id = ?) "
             + "+ (select count(*) from zone where center_id = ?) + (select count(*) from deposit where center_id = ?)",
             Integer.class, id, id, id);
-        if (refs != null && refs > 0) throw new ConflictException("The center is still referenced by users, zones or deposits.");
+        if (refs != null && refs > 0) throw new ConflictException("El centro sigue siendo referenciado por usuarios, zonas o depósitos.");
         jdbc.update("delete from center where id = ?", id);
+        audit.record("center", id, "CENTER_DELETED", code);
     }
 }

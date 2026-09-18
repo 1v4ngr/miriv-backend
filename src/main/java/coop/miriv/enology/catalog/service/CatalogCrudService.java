@@ -1,5 +1,6 @@
 package coop.miriv.enology.catalog.service;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.catalog.dto.CatalogItemRequest;
 import coop.miriv.enology.catalog.dto.CatalogItemResponse;
 import coop.miriv.enology.catalog.entity.CatalogEntry;
@@ -24,18 +25,23 @@ public class CatalogCrudService<T extends CatalogEntry> {
     private final Supplier<T> factory;
     private final Function<T, String> descriptionGetter;
     private final BiConsumer<T, String> descriptionSetter;
+    private final AuditService audit;
+    private final String entityName;
 
     public CatalogCrudService(JpaRepository<T, UUID> repository, Supplier<T> factory,
-                               Function<T, String> descriptionGetter, BiConsumer<T, String> descriptionSetter) {
+                               Function<T, String> descriptionGetter, BiConsumer<T, String> descriptionSetter,
+                               AuditService audit, String entityName) {
         this.repository = repository;
         this.factory = factory;
         this.descriptionGetter = descriptionGetter;
         this.descriptionSetter = descriptionSetter;
+        this.audit = audit;
+        this.entityName = entityName;
     }
 
     public static <T extends CatalogEntry> CatalogCrudService<T> withoutDescription(
-        JpaRepository<T, UUID> repository, Supplier<T> factory) {
-        return new CatalogCrudService<>(repository, factory, entry -> null, (entry, value) -> { });
+        JpaRepository<T, UUID> repository, Supplier<T> factory, AuditService audit, String entityName) {
+        return new CatalogCrudService<>(repository, factory, entry -> null, (entry, value) -> { }, audit, entityName);
     }
 
     public List<CatalogItemResponse> listActive() {
@@ -55,25 +61,30 @@ public class CatalogCrudService<T extends CatalogEntry> {
         entry.setCode(request.code().trim().toUpperCase());
         entry.setName(request.name().trim());
         descriptionSetter.accept(entry, request.description());
-        return toResponse(repository.save(entry));
+        T saved = repository.save(entry);
+        audit.record(entityName, saved.getId(), "CATALOG_CREATED", saved.getName());
+        return toResponse(saved);
     }
 
     @Transactional
     public CatalogItemResponse setActive(UUID id, boolean active) {
-        T entry = repository.findById(id).orElseThrow(() -> NotFoundException.of("Catalog entry", id));
+        T entry = repository.findById(id).orElseThrow(() -> NotFoundException.of("Entrada de catálogo", id));
         entry.setActive(active);
-        return toResponse(repository.save(entry));
+        T saved = repository.save(entry);
+        audit.record(entityName, saved.getId(), active ? "CATALOG_REACTIVATED" : "CATALOG_DEACTIVATED",
+            saved.getName());
+        return toResponse(saved);
     }
 
     @Transactional
     public void deletePhysically(UUID id) {
-        T entry = repository.findById(id).orElseThrow(() -> NotFoundException.of("Catalog entry", id));
+        T entry = repository.findById(id).orElseThrow(() -> NotFoundException.of("Entrada de catálogo", id));
         try {
             repository.delete(entry);
             repository.flush();
+            audit.record(entityName, id, "CATALOG_DELETED", entry.getName());
         } catch (org.springframework.dao.DataIntegrityViolationException cause) {
-            throw new BusinessRuleException(
-                "This entry has already been referenced and can only be deactivated (RF-CAT-03).");
+            throw new BusinessRuleException("Esta entrada ya está referenciada y solo se puede desactivar (RF-CAT-03).");
         }
     }
 

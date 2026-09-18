@@ -1,5 +1,6 @@
 package coop.miriv.enology.cellar.service;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.cellar.dto.CreateLotRequest;
 import coop.miriv.enology.cellar.dto.LotEntryRequest;
 import coop.miriv.enology.cellar.dto.LotRequest;
@@ -34,13 +35,15 @@ public class LotService {
     private final CurrentUserContext context;
     private final ZoneId timezone;
     private final CodeGenerator codes;
+    private final AuditService audit;
 
     public LotService(JdbcTemplate jdbc, CurrentUserContext context,
-                       @Value("${app.timezone}") String timezone, CodeGenerator codes) {
+                       @Value("${app.timezone}") String timezone, CodeGenerator codes, AuditService audit) {
         this.jdbc = jdbc;
         this.context = context;
         this.timezone = ZoneId.of(timezone);
         this.codes = codes;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -133,6 +136,7 @@ public class LotService {
         }
         jdbc.update("update lot set archived = true, archived_reason = ?, archived_at = now() where id = ?",
             reason == null || reason.isBlank() ? null : reason.trim(), lot.id());
+        audit.record("lot", lot.id(), "LOT_ARCHIVED", reason);
         return get(code);
     }
 
@@ -145,6 +149,7 @@ public class LotService {
         }
         jdbc.update("update lot set archived = false, reopened_at = now(), reopened_reason = ? where id = ?",
             reason == null || reason.isBlank() ? null : reason.trim(), lot.id());
+        audit.record("lot", lot.id(), "LOT_REOPENED", reason);
         return get(code);
     }
 

@@ -58,12 +58,13 @@ public class WorkHomeService {
             + " and a.status = 'PENDING_VALIDATION'::analysis_status", depositZoneParams);
         int ownTaskCount = jdbc.queryForObject("select count(*) from task where responsible_id = ? "
                 + "and status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status)", Integer.class, user.getId());
+        // F2-03: metric labels are now stable codes on the wire; the front maps them via labels.ts.
         List<DashboardMetric> metrics = List.of(
-            new DashboardMetric("Urgent incidents", Integer.toString(urgent), "Open incidents", "error"),
-            new DashboardMetric("Overdue controls", Integer.toString(overdue), "Open overdue tasks", "warning"),
-            new DashboardMetric("Pending validations", Integer.toString(pendingValidation), "Laboratory queue", "default"));
+            new DashboardMetric("URGENT_INCIDENTS", Integer.toString(urgent), null, "error"),
+            new DashboardMetric("OVERDUE_CONTROLS", Integer.toString(overdue), null, "warning"),
+            new DashboardMetric("PENDING_VALIDATIONS", Integer.toString(pendingValidation), null, "default"));
         List<AttentionItem> items = jdbc.query("select i.code, d.code as deposit_code, i.priority::text, "
-                + "coalesce(cat.name, 'Unclassified') as category, coalesce(l.code, '') as lot_code, "
+                + "cat.name as category, coalesce(l.code, '') as lot_code, "
                 + "i.title, i.opened_at from incident i join deposit d on d.id = i.deposit_id "
                 + "left join content_unit cu on cu.id = i.content_unit_id "
                 + "left join lot l on l.id = cu.lot_id "
@@ -76,8 +77,8 @@ public class WorkHomeService {
                 return new AttentionItem(rs.getString("code"), rs.getString("deposit_code"),
                     priority.equals("URGENT") ? "critical" : "high", priority,
                     rs.getString("category"), rs.getString("lot_code"), rs.getString("title"),
-                    null, null, "Open incident", rs.getTimestamp("opened_at").toInstant().toString(),
-                    "View evidence");
+                    null, null, null, rs.getTimestamp("opened_at").toInstant().toString(),
+                    null);
             }, depositZoneParams);
         List<RecentActivity> activity = jdbc.query("select m.effective_at, m.code, m.type::text as type "
                 + "from movement m join movement_line ml on ml.movement_id = m.id "
@@ -89,9 +90,10 @@ public class WorkHomeService {
                 rs.getTimestamp("effective_at").toInstant().atZone(timezone).format(DateTimeFormatter.ofPattern("HH:mm")),
                 rs.getString("type") + " " + rs.getString("code")), centerId, centerId);
         String updatedAt = Instant.now().atZone(timezone).format(DateTimeFormatter.ofPattern("HH:mm"));
+        // F2-03: campaign is just the year; the front renders "Campaña 2026".
         return new WorkHomeResponse(context.center().getName(),
-            "Campaign " + java.time.LocalDate.now(timezone).getYear(), updatedAt, urgent, attention,
-            metrics, items, new OwnTasks("available", ownTaskCount, ownTaskCount + " open tasks"), activity);
+            Integer.toString(java.time.LocalDate.now(timezone).getYear()), updatedAt, urgent, attention,
+            metrics, items, new OwnTasks("available", ownTaskCount, Integer.toString(ownTaskCount)), activity);
     }
 
     private int count(String sql, Object... params) { return jdbc.queryForObject(sql, Integer.class, params); }

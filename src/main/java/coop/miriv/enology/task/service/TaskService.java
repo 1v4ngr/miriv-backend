@@ -1,5 +1,7 @@
 package coop.miriv.enology.task.service;
 
+import coop.miriv.enology.audit.AuditService;
+import coop.miriv.enology.common.CodeGenerator;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.entity.AppUser;
@@ -27,10 +29,14 @@ public class TaskService {
 
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
+    private final CodeGenerator codes;
+    private final AuditService audit;
 
-    public TaskService(JdbcTemplate jdbc, CurrentUserContext context) {
+    public TaskService(JdbcTemplate jdbc, CurrentUserContext context, CodeGenerator codes, AuditService audit) {
         this.jdbc = jdbc;
         this.context = context;
+        this.codes = codes;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -48,21 +54,23 @@ public class TaskService {
     @Transactional
     public TaskResponse create(CreateTaskRequest request) {
         UUID centerId = context.centerId();
-        if (!PRIORITIES.contains(request.priority())) throw new BusinessRuleException("Unsupported task priority.");
+        if (!PRIORITIES.contains(request.priority())) throw new BusinessRuleException("Prioridad de tarea no soportada.");
         UUID depositId = depositId(request.depositCode(), centerId);
         context.requireInZone("TASK_CREATE", depositZone(depositId));
         UUID contentId = contentId(request.contentCode(), centerId);
         if (contentId != null) requireCurrentLocation(contentId, depositId);
         UUID responsibleId = responsibleId(request.responsible(), centerId);
         UUID id = UUID.randomUUID();
-        String code = "TSK-" + java.time.LocalDate.now().getYear() + "-"
-            + id.toString().substring(0, 8).toUpperCase(Locale.ROOT);
+        // F2-05: human-readable sequential code (e.g. TSK-2026-00042) instead of UUID-derived token.
+        String code = codes.next("TSK", java.time.LocalDate.now().getYear());
         jdbc.update("insert into task(id, code, title, deposit_id, content_unit_id, responsible_id, "
                 + "due_at, priority, status, completion_criterion, description) values (?, ?, ?, ?, ?, ?, ?, "
                 + "cast(? as task_priority), 'PENDING'::task_status, ?, ?)",
             id, code, request.title().trim(), depositId, contentId, responsibleId,
             Timestamp.from(request.dueAt()), request.priority(), blankToNull(request.completionCriterion()),
             blankToNull(request.description()));
+        audit.record("task", id, "TASK_CREATED",
+            "Creada para " + request.responsible().trim() + " en " + normalize(request.depositCode()));
         return get(code);
     }
 
@@ -70,9 +78,10 @@ public class TaskService {
     public TaskResponse start(String code) {
         TaskLock task = lock(code);
         requireAssigneeOrManager(task);
-        if (!task.status().equals("PENDING")) throw new BusinessRuleException("Only pending tasks can be started.");
+        if (!task.status().equals("PENDING")) throw new BusinessRuleException("Solo las tareas pendientes se pueden iniciar.");
         if (task.contentId() != null) requireCurrentLocation(task.contentId(), task.depositId());
         jdbc.update("update task set status = 'IN_PROGRESS'::task_status where id = ?", task.id());
+        audit.record("task", task.id(), "TASK_STARTED", null);
         return get(code);
     }
 
@@ -81,7 +90,7 @@ public class TaskService {
         TaskLock task = lock(code);
         requireAssigneeOrManager(task);
         if (!task.status().equals("PENDING") && !task.status().equals("IN_PROGRESS")) {
-            throw new BusinessRuleException("Task is not open for completion.");
+            throw new BusinessRuleException("La tarea no está abierta para completarse.");
         }
         if (task.contentId() != null) requireCurrentLocation(task.contentId(), task.depositId());
         Instant executedAt = request.executedAt() == null ? Instant.now() : request.executedAt();
@@ -91,13 +100,14 @@ public class TaskService {
         UUID sampleId = sampleId(request.sampleCode(), task.contentId(), context.centerId(),
             "ANALYSIS_REQUIRED".equals(task.completionCriterion()));
         if ("ANALYSIS_REQUIRED".equals(task.completionCriterion()) && sampleId == null) {
-            throw new BusinessRuleException("A linked sample is required to complete this analytical task.");
+            throw new BusinessRuleException("Hace falta una muestra vinculada para completar esta tarea analítica.");
         }
         jdbc.update("insert into task_execution(id, task_id, result, observations, sample_id, sample_point, executed_at, recorded_by_id) "
                 + "values (?, ?, ?, ?, ?, ?, ?, ?)", UUID.randomUUID(), task.id(), request.result().trim(),
             blankToNull(request.observations()), sampleId, blankToNull(request.samplePoint()),
             Timestamp.from(executedAt), context.userId());
         jdbc.update("update task set status = 'DONE'::task_status where id = ?", task.id());
+        audit.record("task", task.id(), "TASK_COMPLETED", request.result().trim());
         return get(code);
     }
 
@@ -105,17 +115,18 @@ public class TaskService {
     public TaskResponse cancel(String code, String reason) {
         TaskLock task = lock(code);
         if (task.status().equals("DONE") || task.status().equals("CANCELLED")) {
-            throw new BusinessRuleException("Completed or cancelled tasks cannot be cancelled again.");
+            throw new BusinessRuleException("Las tareas completadas o canceladas no se pueden cancelar de nuevo.");
         }
         jdbc.update("update task set status = 'CANCELLED'::task_status, cancelled_reason = ? where id = ?",
             reason.trim(), task.id());
+        audit.record("task", task.id(), "TASK_CANCELLED", reason.trim());
         return get(code);
     }
 
     private TaskResponse find(String code, UUID centerId) {
         List<TaskResponse> rows = jdbc.query(TASK_SELECT + " where d.center_id = ? and t.code = ?",
             (rs, index) -> response(rs), centerId, normalize(code));
-        if (rows.isEmpty()) throw new NotFoundException("Task not found.");
+        if (rows.isEmpty()) throw new NotFoundException("Tarea no encontrada.");
         return rows.getFirst();
     }
 
@@ -139,20 +150,20 @@ public class TaskService {
                 rs.getObject("deposit_id", UUID.class), rs.getObject("content_unit_id", UUID.class),
                 rs.getObject("responsible_id", UUID.class),
                 rs.getString("status"), rs.getString("completion_criterion")), context.centerId(), normalize(code));
-        if (rows.isEmpty()) throw new NotFoundException("Task not found.");
+        if (rows.isEmpty()) throw new NotFoundException("Tarea no encontrada.");
         return rows.getFirst();
     }
 
     private void requireCurrentLocation(UUID contentId, UUID depositId) {
         boolean matches = Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from occupation "
             + "where content_unit_id = ? and deposit_id = ? and end_at is null)", Boolean.class, contentId, depositId));
-        if (!matches) throw new BusinessRuleException("Content has moved; review task applicability before executing.");
+        if (!matches) throw new BusinessRuleException("CONTENT_MOVED", "El contenido se ha movido; revisa la aplicabilidad de la tarea antes de ejecutarla.");
     }
 
     private UUID depositId(String code, UUID centerId) {
         List<UUID> ids = jdbc.query("select id from deposit where center_id = ? and code = ? and active = true",
             (rs, index) -> rs.getObject(1, UUID.class), centerId, normalize(code));
-        if (ids.isEmpty()) throw new NotFoundException("Deposit not found.");
+        if (ids.isEmpty()) throw new NotFoundException("Depósito no encontrado.");
         return ids.getFirst();
     }
 
@@ -172,7 +183,7 @@ public class TaskService {
         List<UUID> ids = jdbc.query("select cu.id from content_unit cu join lot l on l.id = cu.lot_id "
                 + "where l.center_id = ? and cu.code = ?", (rs, index) -> rs.getObject(1, UUID.class),
             centerId, normalize(code));
-        if (ids.isEmpty()) throw new NotFoundException("Content unit not found.");
+        if (ids.isEmpty()) throw new NotFoundException("Unidad de contenido no encontrada.");
         return ids.getFirst();
     }
 
@@ -184,7 +195,7 @@ public class TaskService {
         if (requireValidated) sql += " and a.status = 'VALIDATED'::analysis_status";
         List<UUID> ids = jdbc.query(sql, (rs, index) -> rs.getObject(1, UUID.class),
             centerId, normalize(code), contentId, contentId);
-        if (ids.isEmpty()) throw new NotFoundException("Linked sample not found for this task content.");
+        if (ids.isEmpty()) throw new NotFoundException("Muestra vinculada no encontrada para el contenido de esta tarea.");
         return ids.getFirst();
     }
 
@@ -199,7 +210,7 @@ public class TaskService {
     private void requireAssigneeOrManager(TaskLock task) {
         AppUser user = context.user();
         if (!user.getId().equals(task.responsibleId()) && !context.has("TASK_EXECUTE_ANY")) {
-            throw new AccessDeniedException("Task is assigned to another user.");
+            throw new AccessDeniedException("La tarea está asignada a otra persona.");
         }
     }
 

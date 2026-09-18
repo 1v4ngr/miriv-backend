@@ -18,5 +18,9 @@ public record MovementRequest(
     @NotNull @DecimalMin("0.01") BigDecimal volumeLiters,
     @NotNull @DecimalMin("0.00") BigDecimal lossLiters,
     String idempotencyKey,
-    boolean authorizeMixture
+    boolean authorizeMixture,
+    // F2-06: client-supplied expected balances; if they differ from the current
+    // balances, the server responds 409 STALE_BALANCE instead of writing.
+    BigDecimal expectedSourceLiters,
+    BigDecimal expectedDestinationLiters
 ) {}

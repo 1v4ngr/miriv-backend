@@ -18,5 +18,6 @@ spring:
 app:
   security:
     jwt:
+      # Same access-token-minutes as the base config (F1B-08): override with APP_JWT_MINUTES
+      # if a longer-lived dev token is ever needed, instead of hardcoding a second value here.
       secret: ${JWT_SECRET:change-this-development-secret-must-be-at-least-32-bytes-long}
-      access-token-minutes: 480

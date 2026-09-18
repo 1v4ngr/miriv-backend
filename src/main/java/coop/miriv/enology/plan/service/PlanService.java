@@ -1,5 +1,6 @@
 package coop.miriv.enology.plan.service;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
@@ -27,10 +28,12 @@ public class PlanService {
 
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
+    private final AuditService audit;
 
-    public PlanService(JdbcTemplate jdbc, CurrentUserContext context) {
+    public PlanService(JdbcTemplate jdbc, CurrentUserContext context, AuditService audit) {
         this.jdbc = jdbc;
         this.context = context;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
@@ -43,7 +46,7 @@ public class PlanService {
                 + "where p.content_unit_id = ?",
             (rs, index) -> new PlanRow(rs.getObject("id", UUID.class), rs.getString("name"),
                 rs.getString("destination"), rs.getInt("version_number")), content.id());
-        if (plans.isEmpty()) throw new NotFoundException("Elaboration plan not found.");
+        if (plans.isEmpty()) throw new NotFoundException("Plan de elaboración no encontrado.");
         PlanRow plan = plans.getFirst();
         List<PlanVersionResponse> versions = jdbc.query("select v.version_number, v.alcoholic_strategy, v.yeast, "
                 + "v.inoculation_date, v.sugar_target_g_per_l, v.malolactic_intent::text, "
@@ -59,9 +62,9 @@ public class PlanService {
     @Transactional
     public PlanResponse create(String contentCode, CreatePlanRequest request) {
         ContentScope content = content(contentCode);
-        if (!content.active()) throw new BusinessRuleException("Cannot create a plan for inactive content.");
+        if (!content.active()) throw new BusinessRuleException("No se puede crear un plan para contenido inactivo.");
         if (Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from elaboration_plan where content_unit_id = ?)",
-            Boolean.class, content.id()))) throw new ConflictException("Content already has a plan.");
+            Boolean.class, content.id()))) throw new ConflictException("El contenido ya tiene un plan.");
         validate(request.version());
         UUID destinationId = destinationId(request.destination());
         UUID planId = UUID.randomUUID();
@@ -69,21 +72,23 @@ public class PlanService {
         jdbc.update("insert into elaboration_plan(id, content_unit_id, name, destination_id, responsible_id) "
                 + "values (?, ?, ?, ?, ?)", planId, content.id(), request.name().trim(), destinationId, actor);
         insertVersion(planId, 1, actor, request.version());
+        audit.record("elaboration_plan", planId, "PLAN_CREATED", request.name().trim());
         return get(contentCode);
     }
 
     @Transactional
     public PlanResponse addVersion(String contentCode, PlanVersionRequest request) {
         ContentScope content = content(contentCode);
-        if (!content.active()) throw new BusinessRuleException("Cannot revise a plan for inactive content.");
+        if (!content.active()) throw new BusinessRuleException("No se puede revisar un plan para contenido inactivo.");
         validate(request);
         List<UUID> plans = jdbc.query("select id from elaboration_plan where content_unit_id = ? for update",
             (rs, index) -> rs.getObject(1, UUID.class), content.id());
-        if (plans.isEmpty()) throw new NotFoundException("Elaboration plan not found.");
+        if (plans.isEmpty()) throw new NotFoundException("Plan de elaboración no encontrado.");
         UUID planId = plans.getFirst();
         Integer nextNumber = jdbc.queryForObject("select coalesce(max(version_number), 0) + 1 "
             + "from plan_version where plan_id = ?", Integer.class, planId);
         insertVersion(planId, nextNumber, context.userId(), request);
+        audit.record("elaboration_plan", planId, "PLAN_VERSIONED", "Versión " + nextNumber + " · " + request.reason().trim());
         return get(contentCode);
     }
 
@@ -116,11 +121,11 @@ public class PlanService {
 
     private void validate(PlanVersionRequest request) {
         if (!INTENTS.contains(request.malolacticIntent())) {
-            throw new BusinessRuleException("Unsupported malolactic intention.");
+            throw new BusinessRuleException("Intención maloláctica no soportada.");
         }
         if (request.temperatureMinCelsius() != null && request.temperatureMaxCelsius() != null
             && request.temperatureMinCelsius().compareTo(request.temperatureMaxCelsius()) > 0) {
-            throw new BusinessRuleException("Minimum temperature exceeds maximum temperature.");
+            throw new BusinessRuleException("La temperatura mínima supera a la máxima.");
         }
     }
 
@@ -129,7 +134,7 @@ public class PlanService {
         List<UUID> ids = jdbc.query("select id from destination where active = true "
                 + "and (lower(code) = lower(?) or lower(name) = lower(?))",
             (rs, index) -> rs.getObject(1, UUID.class), value.trim(), value.trim());
-        if (ids.isEmpty()) throw new NotFoundException("Destination catalog value not found.");
+        if (ids.isEmpty()) throw new NotFoundException("Valor de catálogo de destino no encontrado.");
         return ids.getFirst();
     }
 
@@ -137,7 +142,7 @@ public class PlanService {
         if (value == null || value.isBlank()) return null;
         List<UUID> ids = jdbc.query("select id from analysis_panel where lower(code) = lower(?) or lower(name) = lower(?)",
             (rs, index) -> rs.getObject(1, UUID.class), value.trim(), value.trim());
-        if (ids.isEmpty()) throw new NotFoundException("Sampling panel not found.");
+        if (ids.isEmpty()) throw new NotFoundException("Panel de muestreo no encontrado.");
         return ids.getFirst();
     }
 
@@ -147,7 +152,7 @@ public class PlanService {
                 + "join lot l on l.id = cu.lot_id where l.center_id = ? and cu.code = ?",
             (rs, index) -> new ContentScope(rs.getObject("id", UUID.class), rs.getString("code"),
                 rs.getBoolean("active")), centerId, normalize(code));
-        if (matches.isEmpty()) throw new NotFoundException("Content unit not found.");
+        if (matches.isEmpty()) throw new NotFoundException("Unidad de contenido no encontrada.");
         return matches.getFirst();
     }
 

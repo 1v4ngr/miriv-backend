@@ -1,5 +1,6 @@
 package coop.miriv.enology.catalog.web;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.catalog.dto.CatalogItemRequest;
 import coop.miriv.enology.catalog.dto.CatalogItemResponse;
 import coop.miriv.enology.catalog.entity.Color;
@@ -44,14 +45,15 @@ public class CatalogController {
     public CatalogController(ProductTypeRepository productTypeRepository, ColorRepository colorRepository,
                               DestinationRepository destinationRepository,
                               InternalCategoryRepository internalCategoryRepository,
-                              VarietyRepository varietyRepository) {
+                              VarietyRepository varietyRepository,
+                              AuditService audit) {
         this.productTypes = new CatalogCrudService<>(productTypeRepository, ProductType::new,
-            ProductType::getDescription, ProductType::setDescription);
-        this.colors = CatalogCrudService.withoutDescription(colorRepository, Color::new);
-        this.destinations = CatalogCrudService.withoutDescription(destinationRepository, Destination::new);
+            ProductType::getDescription, ProductType::setDescription, audit, "product_type");
+        this.colors = CatalogCrudService.withoutDescription(colorRepository, Color::new, audit, "color");
+        this.destinations = CatalogCrudService.withoutDescription(destinationRepository, Destination::new, audit, "destination");
         this.internalCategories = new CatalogCrudService<>(internalCategoryRepository, InternalCategory::new,
-            InternalCategory::getDescription, InternalCategory::setDescription);
-        this.varieties = CatalogCrudService.withoutDescription(varietyRepository, Variety::new);
+            InternalCategory::getDescription, InternalCategory::setDescription, audit, "internal_category");
+        this.varieties = CatalogCrudService.withoutDescription(varietyRepository, Variety::new, audit, "variety");
     }
 
     @GetMapping("/product-types")
@@ -145,7 +147,7 @@ public class CatalogController {
         boolean catalogManager = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
             .anyMatch((authority) -> authority.getAuthority().equals("PERM_CATALOG_MANAGE")
                 || authority.getAuthority().equals("PERM_LAB_CATALOG_MANAGE"));
-        if (!catalogManager) throw new AccessDeniedException("Only administrators can list inactive catalog items.");
+        if (!catalogManager) throw new AccessDeniedException("Solo los administradores pueden listar elementos inactivos del catálogo.");
         return service.listAll();
     }
 }
