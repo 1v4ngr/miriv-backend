@@ -1,12 +1,16 @@
 package coop.miriv.enology.identity.service;
 
 import coop.miriv.enology.common.exception.NotFoundException;
+import coop.miriv.enology.identity.dto.AccountSummaryResponse;
 import coop.miriv.enology.identity.dto.CenterMemberResponse;
 import coop.miriv.enology.identity.dto.CenterOption;
 import coop.miriv.enology.identity.dto.CurrentUserProfileResponse;
 import coop.miriv.enology.identity.dto.UpdateProfileRequest;
+import coop.miriv.enology.identity.entity.AppUser;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -18,10 +22,38 @@ public class CurrentUserProfileService {
 
     private final JdbcTemplate jdbc;
     private final CurrentUserProvider currentUser;
+    private final CurrentUserContext context;
 
-    public CurrentUserProfileService(JdbcTemplate jdbc, CurrentUserProvider currentUser) {
+    public CurrentUserProfileService(JdbcTemplate jdbc, CurrentUserProvider currentUser, CurrentUserContext context) {
         this.jdbc = jdbc;
         this.currentUser = currentUser;
+        this.context = context;
+    }
+
+    @Transactional(readOnly = true)
+    public AccountSummaryResponse getAccountSummary() {
+        AppUser user = context.user();
+        CurrentUserProfileResponse profile = getCurrentProfile();
+        List<AccountSummaryResponse.RoleSummary> roles = user.getRoles().stream()
+            .map(assignment -> new AccountSummaryResponse.RoleSummary(
+                assignment.getRole().getCode().name(), assignment.getRole().getName(),
+                assignment.getZone() == null ? List.of() : List.of(assignment.getZone().getName())))
+            .toList();
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        AppUserPrincipal principal = (authentication != null && authentication.getPrincipal() instanceof AppUserPrincipal p) ? p : null;
+        List<AccountSummaryResponse.PermissionSummary> permissions = principal == null ? List.of() :
+            principal.getPermissions().entrySet().stream()
+                .sorted((left, right) -> left.getKey().compareTo(right.getKey()))
+                .map(entry -> new AccountSummaryResponse.PermissionSummary(entry.getKey(),
+                    entry.getValue().allZones(),
+                    entry.getValue().zoneIds().stream().map(UUID::toString).toList()))
+                .toList();
+        PermissionScope scope = principal == null ? new PermissionScope(true, java.util.Set.of()) : principal.getReadScope();
+        AccountSummaryResponse.ReadScope read = new AccountSummaryResponse.ReadScope(scope.allZones(),
+            scope.zoneIds().stream().map(UUID::toString).toList());
+        return new AccountSummaryResponse(profile.username(), profile.email(), profile.displayName(),
+            profile.firstName(), profile.lastName(), profile.avatarUrl(), profile.jobTitle(),
+            profile.centerCode(), profile.centerName(), roles, permissions, profile.zones(), read);
     }
 
     @Transactional(readOnly = true)

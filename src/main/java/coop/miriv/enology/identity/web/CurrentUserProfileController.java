@@ -1,5 +1,6 @@
 package coop.miriv.enology.identity.web;
 
+import coop.miriv.enology.identity.dto.AccountSummaryResponse;
 import coop.miriv.enology.identity.dto.CenterMemberResponse;
 import coop.miriv.enology.identity.dto.CenterOption;
 import coop.miriv.enology.identity.dto.CurrentUserProfileResponse;
@@ -24,6 +25,11 @@ public class CurrentUserProfileController {
     }
 
     @GetMapping("/me")
+    public AccountSummaryResponse me() {
+        return service.getAccountSummary();
+    }
+
+    @GetMapping("/profile")
     public CurrentUserProfileResponse currentProfile() {
         return service.getCurrentProfile();
     }
