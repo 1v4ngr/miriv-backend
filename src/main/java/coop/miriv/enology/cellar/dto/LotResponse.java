@@ -15,5 +15,6 @@ public record LotResponse(
     String variety,
     List<String> varieties,
     boolean archived,
-    List<String> contentCodes
+    List<String> contentCodes,
+    List<String> activeContentCodes
 ) {}

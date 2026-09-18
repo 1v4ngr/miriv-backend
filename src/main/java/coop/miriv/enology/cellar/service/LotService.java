@@ -174,9 +174,13 @@ public class LotService {
     private List<LotResponse> enrich(List<LotRow> rows) {
         if (rows.isEmpty()) return List.of();
         Map<UUID, List<String>> content = new HashMap<>();
+        Map<UUID, List<String>> activeContent = new HashMap<>();
         Map<UUID, List<String>> varieties = new HashMap<>();
         for (LotRow row : rows) {
-            content.put(row.id(), jdbc.query("select code from content_unit where lot_id = ? order by created_at",
+            List<String> allCodes = jdbc.query("select code from content_unit where lot_id = ? order by created_at",
+                (rs, index) -> rs.getString(1), row.id());
+            content.put(row.id(), allCodes);
+            activeContent.put(row.id(), jdbc.query("select code from content_unit where lot_id = ? and active = true order by created_at",
                 (rs, index) -> rs.getString(1), row.id()));
             varieties.put(row.id(), jdbc.query("select v.name from lot_variety lv join variety v on v.id = lv.variety_id where lv.lot_id = ? order by v.name",
                 (rs, index) -> rs.getString(1), row.id()));
@@ -186,7 +190,7 @@ public class LotService {
             row.category() == null ? "Unclassified" : row.category(),
             row.destination() == null ? "Pending" : row.destination(),
             row.responsible(), row.responsibleUsername(), row.entryDate(), row.origin() == null ? "" : row.origin(),
-            String.join(", ", varieties.get(row.id())), varieties.get(row.id()), row.archived(), content.get(row.id())));
+            String.join(", ", varieties.get(row.id())), varieties.get(row.id()), row.archived(), content.get(row.id()), activeContent.get(row.id())));
         return result;
     }
 
