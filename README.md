@@ -9,7 +9,7 @@ Spring Boot 4.1.1 / Java 25 REST API backed by PostgreSQL. The code is organized
 3. Run `mvn spring-boot:run` with Java 25 selected.
 4. Open `http://localhost:8080/actuator/health` or `http://localhost:8080/docs`.
 
-The `dev` profile uses `jdbc:postgresql://localhost:5432/miriv`, username/password `miriv` unless `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` override them. Flyway applies `V1`–`V15` on startup. For any non-development profile, database settings and `JWT_SECRET` are mandatory environment variables. The local seed account is `m.solana` with password `ChangeMe123!`; **rotate or disable it before any non-local deployment**. The current migrations seed this account in every new database, so the project is not ready for public deployment as-is.
+The `dev` profile uses `jdbc:postgresql://localhost:5432/miriv`, username/password `miriv` unless `DB_URL`, `DB_USERNAME`, and `DB_PASSWORD` override them. Flyway applies `V1`–`V15` on startup. For any non-development profile, database settings and `JWT_SECRET` are mandatory environment variables. The local seed account is `m.solana` with password `ChangeMe123!`; **rotate or disable it before any non-local deployment**. The current migrations seed this account in every new database, so the project is not ready for public deployment as-is. The `DefaultCredentialsGuard` ApplicationRunner blocks startup under any profile other than `dev` or `test` while the `ChangeMe123!` sample password still authenticates an active user — change those credentials (or deactivate the account) before booting under `prod`/`staging`.
 
 ## Implemented API
 
