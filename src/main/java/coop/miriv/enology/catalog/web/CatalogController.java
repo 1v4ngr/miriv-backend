@@ -18,7 +18,6 @@ import java.util.List;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -61,20 +60,17 @@ public class CatalogController {
     }
 
     @PostMapping("/product-types")
-    @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public CatalogItemResponse createProductType(@Valid @RequestBody CatalogItemRequest request) {
         return productTypes.create(request);
     }
 
     @PutMapping("/product-types/{id}/active")
-    @PreAuthorize("hasRole('ADMIN')")
     public CatalogItemResponse setProductTypeActive(@PathVariable UUID id, @RequestBody boolean active) {
         return productTypes.setActive(id, active);
     }
 
     @DeleteMapping("/product-types/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteProductType(@PathVariable UUID id) {
         productTypes.deletePhysically(id);
@@ -86,14 +82,12 @@ public class CatalogController {
     }
 
     @PostMapping("/colors")
-    @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public CatalogItemResponse createColor(@Valid @RequestBody CatalogItemRequest request) {
         return colors.create(request);
     }
 
     @PutMapping("/colors/{id}/active")
-    @PreAuthorize("hasRole('ADMIN')")
     public CatalogItemResponse setColorActive(@PathVariable UUID id, @RequestBody boolean active) {
         return colors.setActive(id, active);
     }
@@ -104,14 +98,12 @@ public class CatalogController {
     }
 
     @PostMapping("/destinations")
-    @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public CatalogItemResponse createDestination(@Valid @RequestBody CatalogItemRequest request) {
         return destinations.create(request);
     }
 
     @PutMapping("/destinations/{id}/active")
-    @PreAuthorize("hasRole('ADMIN')")
     public CatalogItemResponse setDestinationActive(@PathVariable UUID id, @RequestBody boolean active) {
         return destinations.setActive(id, active);
     }
@@ -122,14 +114,12 @@ public class CatalogController {
     }
 
     @PostMapping("/internal-categories")
-    @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public CatalogItemResponse createInternalCategory(@Valid @RequestBody CatalogItemRequest request) {
         return internalCategories.create(request);
     }
 
     @PutMapping("/internal-categories/{id}/active")
-    @PreAuthorize("hasRole('ADMIN')")
     public CatalogItemResponse setInternalCategoryActive(@PathVariable UUID id, @RequestBody boolean active) {
         return internalCategories.setActive(id, active);
     }
@@ -140,23 +130,22 @@ public class CatalogController {
     }
 
     @PostMapping("/varieties")
-    @PreAuthorize("hasRole('ADMIN')")
     @ResponseStatus(HttpStatus.CREATED)
     public CatalogItemResponse createVariety(@Valid @RequestBody CatalogItemRequest request) {
         return varieties.create(request);
     }
 
     @PutMapping("/varieties/{id}/active")
-    @PreAuthorize("hasRole('ADMIN')")
     public CatalogItemResponse setVarietyActive(@PathVariable UUID id, @RequestBody boolean active) {
         return varieties.setActive(id, active);
     }
 
     private <T extends coop.miriv.enology.catalog.entity.CatalogEntry> List<CatalogItemResponse> listFor(CatalogCrudService<T> service, boolean includeInactive) {
         if (!includeInactive) return service.listActive();
-        boolean admin = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
-            .anyMatch((authority) -> authority.getAuthority().equals("ROLE_ADMIN"));
-        if (!admin) throw new AccessDeniedException("Only administrators can list inactive catalog items.");
+        boolean catalogManager = SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream()
+            .anyMatch((authority) -> authority.getAuthority().equals("PERM_CATALOG_MANAGE")
+                || authority.getAuthority().equals("PERM_LAB_CATALOG_MANAGE"));
+        if (!catalogManager) throw new AccessDeniedException("Only administrators can list inactive catalog items.");
         return service.listAll();
     }
 }

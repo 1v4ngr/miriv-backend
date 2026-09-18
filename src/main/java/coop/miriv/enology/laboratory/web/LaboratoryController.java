@@ -10,7 +10,6 @@ import coop.miriv.enology.laboratory.service.LaboratoryService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,30 +35,25 @@ public class LaboratoryController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('LABORATORY', 'ENOLOGIST')")
     public SampleResponse create(@Valid @RequestBody NewSampleRequest request) { return service.create(request); }
 
     @PutMapping("/{code}/results")
-    @PreAuthorize("hasAnyRole('LABORATORY', 'ENOLOGIST')")
     public SampleResponse saveResults(@PathVariable String code, @Valid @RequestBody ResultsRequest request) {
         return service.saveResults(code, request);
     }
 
     @PostMapping("/{code}/validate")
-    @PreAuthorize("hasAnyRole('LABORATORY', 'ENOLOGIST')")
     public SampleResponse validate(@PathVariable String code, @RequestBody NoteRequest request) {
         return service.validate(code, request.note());
     }
 
     @PostMapping("/{code}/results/{parameter}/correction")
-    @PreAuthorize("hasAnyRole('LABORATORY', 'ENOLOGIST')")
     public SampleResponse correct(@PathVariable String code, @PathVariable String parameter,
                                   @Valid @RequestBody CorrectionRequest request) {
         return service.correct(code, parameter, request);
     }
 
     @PostMapping("/{code}/invalidate")
-    @PreAuthorize("hasAnyRole('LABORATORY', 'ENOLOGIST')")
     public SampleResponse invalidate(@PathVariable String code, @Valid @RequestBody ReasonRequest request) {
         return service.invalidate(code, request.reason());
     }

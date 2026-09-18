@@ -8,7 +8,6 @@ import coop.miriv.enology.task.service.TaskService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -33,21 +32,17 @@ public class TaskController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER')")
     public TaskResponse create(@Valid @RequestBody CreateTaskRequest request) { return service.create(request); }
 
     @PostMapping("/{code}/start")
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'CELLAR_OPERATOR', 'PRODUCTION_MANAGER')")
     public TaskResponse start(@PathVariable String code) { return service.start(code); }
 
     @PostMapping("/{code}/complete")
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'CELLAR_OPERATOR', 'LABORATORY', 'PRODUCTION_MANAGER')")
     public TaskResponse complete(@PathVariable String code, @Valid @RequestBody CompleteTaskRequest request) {
         return service.complete(code, request);
     }
 
     @PostMapping("/{code}/cancel")
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER')")
     public TaskResponse cancel(@PathVariable String code, @Valid @RequestBody CancelTaskRequest request) {
         return service.cancel(code, request.reason());
     }

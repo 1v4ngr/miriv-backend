@@ -5,10 +5,8 @@ import coop.miriv.enology.identity.service.CenterAdminService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/admin/centers")
 public class CenterAdminController {

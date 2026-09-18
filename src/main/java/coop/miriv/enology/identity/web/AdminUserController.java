@@ -6,10 +6,8 @@ import coop.miriv.enology.identity.dto.UpdateUserCentersRequest;
 import coop.miriv.enology.identity.service.AdminUserService;
 import jakarta.validation.Valid;
 import java.util.List;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-@PreAuthorize("hasRole('ADMIN')")
 @RestController
 @RequestMapping("/api/admin/users")
 public class AdminUserController {

@@ -5,7 +5,6 @@ import coop.miriv.enology.cellar.dto.StateReviewRequest;
 import coop.miriv.enology.cellar.service.ContentService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,7 +26,6 @@ public class ContentController {
 
     @PostMapping("/{code}/state-reviews")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    @PreAuthorize("hasRole('ENOLOGIST')")
     public void review(@PathVariable String code, @Valid @RequestBody StateReviewRequest request) {
         service.review(code, request);
     }

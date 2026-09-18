@@ -3,7 +3,6 @@ package coop.miriv.enology.task.service;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.entity.AppUser;
-import coop.miriv.enology.identity.entity.RoleCode;
 import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.task.dto.CompleteTaskRequest;
 import coop.miriv.enology.task.dto.CreateTaskRequest;
@@ -186,8 +185,7 @@ public class TaskService {
 
     private void requireAssigneeOrManager(TaskLock task) {
         AppUser user = context.user();
-        if (!user.getId().equals(task.responsibleId()) && !user.hasRole(RoleCode.ENOLOGIST)
-            && !user.hasRole(RoleCode.PRODUCTION_MANAGER)) {
+        if (!user.getId().equals(task.responsibleId()) && !context.has("TASK_EXECUTE_ANY")) {
             throw new AccessDeniedException("Task is assigned to another user.");
         }
     }

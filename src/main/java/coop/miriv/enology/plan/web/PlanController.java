@@ -6,7 +6,6 @@ import coop.miriv.enology.plan.dto.PlanVersionRequest;
 import coop.miriv.enology.plan.service.PlanService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -28,13 +27,11 @@ public class PlanController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasRole('ENOLOGIST')")
     public PlanResponse create(@PathVariable String contentCode, @Valid @RequestBody CreatePlanRequest request) {
         return service.create(contentCode, request);
     }
 
     @PostMapping("/versions")
-    @PreAuthorize("hasRole('ENOLOGIST')")
     public PlanResponse addVersion(@PathVariable String contentCode, @Valid @RequestBody PlanVersionRequest request) {
         return service.addVersion(contentCode, request);
     }

@@ -7,7 +7,6 @@ import coop.miriv.enology.cellar.service.DepositService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
-import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -39,19 +38,16 @@ public class DepositController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER', 'ADMIN')")
     public DepositResponse create(@Valid @RequestBody DepositRequest request) {
         return service.create(request);
     }
 
     @PatchMapping("/{code}")
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER', 'ADMIN')")
     public DepositResponse update(@PathVariable String code,
                                   @Valid @RequestBody UpdateDepositRequest request) {
         return service.update(code, request);
     }
 
     @PostMapping("/{code}/deactivate")
-    @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER', 'ADMIN')")
     public DepositResponse deactivate(@PathVariable String code) { return service.deactivate(code); }
 }

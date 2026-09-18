@@ -3,15 +3,17 @@ package coop.miriv.enology.config;
 import coop.miriv.enology.security.JwtAuthenticationFilter;
 import coop.miriv.enology.security.JwtProperties;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -19,6 +21,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -26,7 +29,6 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
 
@@ -52,16 +54,36 @@ public class SecurityConfig {
     }
 
     @Bean
+    public AccessDeniedHandler accessDeniedHandler() {
+        return (request, response, exception) -> {
+            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+            response.getWriter().write("{\"status\":403,\"message\":\"No tienes permiso para realizar esta acción.\"}");
+        };
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource,
-                                            AuthenticationEntryPoint authenticationEntryPoint) throws Exception {
+                                            AuthenticationEntryPoint authenticationEntryPoint,
+                                            AccessDeniedHandler accessDeniedHandler) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-            .exceptionHandling(exceptions -> exceptions.authenticationEntryPoint(authenticationEntryPoint))
-            .authorizeHttpRequests(authorize -> authorize
-                .requestMatchers("/api/auth/**", "/docs/**", "/v3/api-docs/**", "/actuator/health").permitAll()
-                .anyRequest().authenticated())
+            .exceptionHandling(exceptions -> exceptions
+                .authenticationEntryPoint(authenticationEntryPoint)
+                .accessDeniedHandler(accessDeniedHandler))
+            .authorizeHttpRequests(authorize -> {
+                authorize.requestMatchers("/api/auth/**", "/docs/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll();
+                for (PermissionRules.Rule rule : PermissionRules.RULES) {
+                    String[] authorities = Arrays.stream(rule.permissions()).map(code -> "PERM_" + code).toArray(String[]::new);
+                    if (rule.method() == null) authorize.requestMatchers(rule.pattern()).hasAnyAuthority(authorities);
+                    else authorize.requestMatchers(rule.method(), rule.pattern()).hasAnyAuthority(authorities);
+                }
+                authorize.requestMatchers(HttpMethod.GET, "/api/**").authenticated();
+                authorize.requestMatchers("/api/account/**", "/api/notifications/**").authenticated();
+                authorize.anyRequest().denyAll();
+            })
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
     }
