@@ -1,5 +1,6 @@
 package coop.miriv.enology.identity.web;
 
+import coop.miriv.enology.identity.dto.CenterMemberResponse;
 import coop.miriv.enology.identity.dto.CenterOption;
 import coop.miriv.enology.identity.dto.CurrentUserProfileResponse;
 import coop.miriv.enology.identity.dto.UpdateProfileRequest;
@@ -35,5 +36,10 @@ public class CurrentUserProfileController {
     @GetMapping("/centers")
     public List<CenterOption> centers() {
         return service.listCenters();
+    }
+
+    @GetMapping("/center-members")
+    public List<CenterMemberResponse> centerMembers() {
+        return service.listCenterMembers();
     }
 }

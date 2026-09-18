@@ -113,6 +113,19 @@ public class LotService {
         return get(code);
     }
 
+    /** Soft-deletes a lot by setting {@code archived=true} with the supplied reason. */
+    @Transactional
+    public LotResponse archive(String code, String reason) {
+        UUID centerId = context.centerId();
+        LotRow lot = find(code, centerId);
+        if (lot.archived()) {
+            throw new BusinessRuleException("El lote ya está archivado.");
+        }
+        jdbc.update("update lot set archived = true, archived_reason = ?, archived_at = now() where id = ?",
+            reason == null || reason.isBlank() ? null : reason.trim(), lot.id());
+        return get(code);
+    }
+
     private void createEntry(UUID lotId, String lotCode, int campaign, UUID categoryId,
                              UUID responsibleId, UUID centerId, LotEntryRequest entry) {
         List<DepositSlot> slots = jdbc.query("select id, status::text, useful_capacity_liters from deposit where center_id = ? and code = ? and active = true for update",

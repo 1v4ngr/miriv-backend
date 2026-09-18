@@ -1,6 +1,7 @@
 package coop.miriv.enology.cellar.web;
 
 import coop.miriv.enology.cellar.dto.CreateLotRequest;
+import coop.miriv.enology.cellar.dto.LotArchiveRequest;
 import coop.miriv.enology.cellar.dto.LotResponse;
 import coop.miriv.enology.cellar.dto.LineageEventResponse;
 import coop.miriv.enology.cellar.dto.UpdateLotRequest;
@@ -9,6 +10,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -44,5 +46,17 @@ public class LotController {
     @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER', 'ADMIN')")
     public LotResponse update(@PathVariable String code, @Valid @RequestBody UpdateLotRequest request) {
         return service.update(code, request);
+    }
+
+    /**
+     * Soft-deletes a lot by setting {@code archived=true} with the supplied reason.
+     * Audit trail preserved; the lot is hidden from the active filter and remains
+     * accessible via the "Archivados" / "Todos" filters.
+     */
+    @DeleteMapping("/{code}")
+    @ResponseStatus(HttpStatus.OK)
+    @PreAuthorize("hasAnyRole('ENOLOGIST', 'PRODUCTION_MANAGER', 'ADMIN')")
+    public LotResponse archive(@PathVariable String code, @Valid @RequestBody LotArchiveRequest request) {
+        return service.archive(code, request.reason());
     }
 }

@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
@@ -156,6 +157,42 @@ public class MovementService {
                 destination.id(), destinationUnit.volume());
         }
         return new MovementResponse(movementCode, mixture, sourceFinal, resultContentCode, destinationFinal);
+    }
+
+    /**
+     * Clears the active content of a deposit by recording a {@code LOSS} movement.
+     * Used to undo a mistaken entry without keeping physical content in the deposit.
+     * Audit trail is preserved through the movement (responsible + reason + effective time).
+     */
+    @Transactional
+    public void clearOccupation(String depositCode, String reason, String responsible) {
+        UUID centerId = context.centerId();
+        DepositSlot source = jdbc.query(
+                "select id, code, status::text, useful_capacity_liters from deposit "
+                    + "where center_id = ? and active = true and lower(code) = lower(?) for update",
+                (rs, index) -> new DepositSlot(rs.getObject("id", UUID.class), rs.getString("code"),
+                    rs.getString("status"), rs.getBigDecimal("useful_capacity_liters")),
+                centerId, depositCode == null ? "" : depositCode.trim())
+            .stream().findFirst()
+            .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
+        if (!source.status().equals("OCCUPIED") && !source.status().equals("PENDING_CLEANING")) {
+            throw new BusinessRuleException("El depósito no tiene contenido activo que retirar.");
+        }
+        OccupiedUnit sourceUnit = activeUnit(source.id());
+        if (sourceUnit == null) {
+            throw new BusinessRuleException("El estado del depósito no coincide con ninguna ocupación activa.");
+        }
+        UUID responsiblePk = responsibleId(responsible, centerId);
+        Instant effectiveAt = Instant.now();
+        UUID movementId = UUID.randomUUID();
+        String movementCode = code("MOV", LocalDate.now(timezone).getYear(), movementId);
+        String trimmedReason = reason == null || reason.isBlank() ? "Corrección manual" : reason.trim();
+        jdbc.update("insert into movement(id, code, type, status, effective_at, responsible_id, reason) "
+                + "values (?, ?, 'LOSS'::movement_type, 'EXECUTED'::movement_status, ?, ?, ?)",
+            movementId, movementCode, Timestamp.from(effectiveAt), responsiblePk, trimmedReason);
+        jdbc.update("update occupation set end_at = ?, volume_liters = 0 where id = ?", Timestamp.from(effectiveAt), sourceUnit.occupationId());
+        jdbc.update("update content_unit set volume_liters = 0, active = false where id = ?", sourceUnit.contentId());
+        jdbc.update("update deposit set status = 'PENDING_CLEANING'::deposit_status, updated_at = now() where id = ?", source.id());
     }
 
     private OccupiedUnit activeUnit(UUID depositId) {

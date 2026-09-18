@@ -1,6 +1,7 @@
 package coop.miriv.enology.identity.service;
 
 import coop.miriv.enology.common.exception.NotFoundException;
+import coop.miriv.enology.identity.dto.CenterMemberResponse;
 import coop.miriv.enology.identity.dto.CenterOption;
 import coop.miriv.enology.identity.dto.CurrentUserProfileResponse;
 import coop.miriv.enology.identity.dto.UpdateProfileRequest;
@@ -45,6 +46,23 @@ public class CurrentUserProfileService {
     public List<CenterOption> listCenters() {
         return jdbc.query("select code, name from center order by name",
             (rs, row) -> new CenterOption(rs.getString("code"), rs.getString("name")));
+    }
+
+    @Transactional(readOnly = true)
+    public List<CenterMemberResponse> listCenterMembers() {
+        UUID currentUserId = currentUser.requireCurrentUserId();
+        UUID centerId = jdbc.queryForObject("select center_id from app_user where id = ? and active = true", UUID.class, currentUserId);
+        if (centerId == null) return List.of();
+        return jdbc.query("""
+                select u.username, u.email,
+                       coalesce(nullif(trim(p.first_name || ' ' || p.last_name), ''), u.full_name) as display_name
+                  from app_user u
+                  left join user_profile p on p.user_id = u.id
+                 where u.active = true and u.center_id = ?
+                 order by display_name
+                """,
+            (rs, row) -> new CenterMemberResponse(rs.getString("username"), rs.getString("display_name"), rs.getString("email")),
+            centerId);
     }
 
     @Transactional
