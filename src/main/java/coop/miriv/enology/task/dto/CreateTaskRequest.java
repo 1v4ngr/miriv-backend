@@ -2,6 +2,7 @@ package coop.miriv.enology.task.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.time.Instant;
 
 public record CreateTaskRequest(
@@ -11,5 +12,6 @@ public record CreateTaskRequest(
     @NotBlank String responsible,
     @NotNull Instant dueAt,
     @NotBlank String priority,
-    String completionCriterion
+    String completionCriterion,
+    @Size(max = 1000) String description
 ) {}

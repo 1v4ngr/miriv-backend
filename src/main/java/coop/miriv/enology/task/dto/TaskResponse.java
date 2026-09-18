@@ -13,6 +13,9 @@ public record TaskResponse(
     String priority,
     String status,
     String completionCriterion,
+    String description,
+    String samplePoint,
+    String sampleCode,
     Instant executedAt,
     String result,
     String observations

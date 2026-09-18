@@ -87,11 +87,11 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         deposits.create(new DepositRequest(source, "CENTRO-NORTE", "NAVE-A", "1", new BigDecimal("2000"), "Steel", false));
         deposits.create(new DepositRequest(target, "CENTRO-NORTE", "NAVE-A", "2", new BigDecimal("1000"), "Steel", false));
         lots.create(new CreateLotRequest(new LotRequest(lotCode, LocalDate.now(TIMEZONE).getYear(),
-            "Tinto", "Vino tranquilo", "María Solana", LocalDate.now(TIMEZONE), "Reception 123", "Tempranillo"),
+            "Tinto", "Vino tranquilo", "enologo", LocalDate.now(TIMEZONE), "Reception 123", "Tempranillo"),
             new LotEntryRequest(source, new BigDecimal("1000"), LocalDate.now(TIMEZONE))));
         LocalDateTime movementTime = LocalDateTime.now(TIMEZONE).minusHours(1);
         var movement = movements.register(new MovementRequest("Trasiego", movementTime.toLocalDate(),
-            movementTime.toLocalTime().withNano(0), "María Solana", "Routine transfer", source, target,
+            movementTime.toLocalTime().withNano(0), "enologo", "Routine transfer", source, target,
             new BigDecimal("300"), new BigDecimal("10"), "test-" + suffix, false));
         assertEquals(0, movement.sourceFinalLiters().compareTo(new BigDecimal("690")));
         assertEquals(0, movement.destinationFinalLiters().compareTo(new BigDecimal("300")));
@@ -116,7 +116,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         String sampleCode = "T-M-" + suffix;
         var sample = laboratory.create(new NewSampleRequest(sampleCode, target,
             movement.destinationContentCode(), lotCode, "Tinto", takenAt, takenAt.toLocalDate(),
-            "Control", "María Solana", null, null));
+            "Control", "enologo", null, null));
         assertEquals(movement.destinationContentCode(), sample.contentCode());
         var updated = laboratory.saveResults(sampleCode, new ResultsRequest(
             List.of(new ResultInput("pH", "3,42", "", null, null)), "Borrador",
@@ -137,24 +137,24 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         assertEquals("Pendiente validar", complete.status());
         assertEquals("Validado", laboratory.validate(sampleCode, "Reviewed").status());
         var task = tasks.create(new CreateTaskRequest("Check laboratory trend", target,
-            movement.destinationContentCode(), "María Solana", Instant.now().plusSeconds(86400),
-            "MEDIUM", "ANALYSIS_REQUIRED"));
+            movement.destinationContentCode(), "enologo", Instant.now().plusSeconds(86400),
+            "MEDIUM", "ANALYSIS_REQUIRED", null));
         assertEquals("IN_PROGRESS", tasks.start(task.code()).status());
         assertEquals("DONE", tasks.complete(task.code(),
-            new CompleteTaskRequest("Reviewed", "No action required", sampleCode)).status());
+            new CompleteTaskRequest("Reviewed", "No action required", sampleCode, null, null)).status());
         String incidentCode = "INC-" + suffix;
         jdbc.update("insert into incident(id, code, deposit_id, priority, title) "
                 + "values (?, ?, ?, 'HIGH'::alert_priority, ?)", UUID.randomUUID(), incidentCode,
             transferred.id(), "Manual validation required");
         assertEquals("IN_REVIEW", incidents.acknowledge(incidentCode).status());
-        assertEquals("ASSIGNED", incidents.assign(incidentCode, "María Solana").status());
+        assertEquals("ASSIGNED", incidents.assign(incidentCode, "enologo").status());
         assertTrue(incidents.silence(incidentCode, Instant.now().plusSeconds(3600), "Investigating")
             .silencedUntil().isAfter(Instant.now()));
         assertEquals("RESOLVED", incidents.close(incidentCode,
             new ResolveIncidentRequest("Measurement reviewed", null), false).status());
         LocalDateTime exitTime = LocalDateTime.now(TIMEZONE).minusMinutes(20);
         movements.register(new MovementRequest("Salida", exitTime.toLocalDate(),
-            exitTime.toLocalTime().withNano(0), "María Solana", "Final dispatch", source, null,
+            exitTime.toLocalTime().withNano(0), "enologo", "Final dispatch", source, null,
             new BigDecimal("690"), BigDecimal.ZERO, "exit-" + suffix, false));
         cleaning.start(source);
         cleaning.complete(source, new CompleteCleaningRequest("Wash and inspect", "Passed", "No residue", true));

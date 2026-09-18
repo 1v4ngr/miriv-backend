@@ -15,5 +15,6 @@ public record NewSampleRequest(
     @NotNull LocalDate takenDate,
     @NotBlank String panel,
     @NotBlank String responsible,
-    String observations
+    String observations,
+    String laboratoryCode
 ) {}

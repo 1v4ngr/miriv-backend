@@ -57,10 +57,11 @@ public class TaskService {
         String code = "TSK-" + java.time.LocalDate.now().getYear() + "-"
             + id.toString().substring(0, 8).toUpperCase(Locale.ROOT);
         jdbc.update("insert into task(id, code, title, deposit_id, content_unit_id, responsible_id, "
-                + "due_at, priority, status, completion_criterion) values (?, ?, ?, ?, ?, ?, ?, "
-                + "cast(? as task_priority), 'PENDING'::task_status, ?)",
+                + "due_at, priority, status, completion_criterion, description) values (?, ?, ?, ?, ?, ?, ?, "
+                + "cast(? as task_priority), 'PENDING'::task_status, ?, ?)",
             id, code, request.title().trim(), depositId, contentId, responsibleId,
-            Timestamp.from(request.dueAt()), request.priority(), blankToNull(request.completionCriterion()));
+            Timestamp.from(request.dueAt()), request.priority(), blankToNull(request.completionCriterion()),
+            blankToNull(request.description()));
         return get(code);
     }
 
@@ -82,14 +83,19 @@ public class TaskService {
             throw new BusinessRuleException("Task is not open for completion.");
         }
         if (task.contentId() != null) requireCurrentLocation(task.contentId(), task.depositId());
+        Instant executedAt = request.executedAt() == null ? Instant.now() : request.executedAt();
+        if (executedAt.isAfter(Instant.now().plusSeconds(300))) {
+            throw new BusinessRuleException("La fecha de ejecución no puede estar en el futuro.");
+        }
         UUID sampleId = sampleId(request.sampleCode(), task.contentId(), context.centerId(),
             "ANALYSIS_REQUIRED".equals(task.completionCriterion()));
         if ("ANALYSIS_REQUIRED".equals(task.completionCriterion()) && sampleId == null) {
             throw new BusinessRuleException("A linked sample is required to complete this analytical task.");
         }
-        jdbc.update("insert into task_execution(id, task_id, result, observations, sample_id, recorded_by_id) "
-                + "values (?, ?, ?, ?, ?, ?)", UUID.randomUUID(), task.id(), request.result().trim(),
-            blankToNull(request.observations()), sampleId, context.userId());
+        jdbc.update("insert into task_execution(id, task_id, result, observations, sample_id, sample_point, executed_at, recorded_by_id) "
+                + "values (?, ?, ?, ?, ?, ?, ?, ?)", UUID.randomUUID(), task.id(), request.result().trim(),
+            blankToNull(request.observations()), sampleId, blankToNull(request.samplePoint()),
+            Timestamp.from(executedAt), context.userId());
         jdbc.update("update task set status = 'DONE'::task_status where id = ?", task.id());
         return get(code);
     }
@@ -118,6 +124,8 @@ public class TaskService {
             rs.getString("responsible_username"),
             rs.getTimestamp("due_at") == null ? null : rs.getTimestamp("due_at").toInstant(),
             rs.getString("priority"), rs.getString("status"), rs.getString("completion_criterion"),
+            rs.getString("description"),
+            rs.getString("sample_point"), rs.getString("sample_code"),
             rs.getTimestamp("executed_at") == null ? null : rs.getTimestamp("executed_at").toInstant(),
             rs.getString("result"), rs.getString("observations"));
     }
@@ -189,12 +197,14 @@ public class TaskService {
 
     private static final String TASK_SELECT = "select t.code, t.title, d.code as deposit_code, "
         + "cu.code as content_code, u.full_name as responsible, u.username as responsible_username, t.due_at, t.priority::text, "
-        + "t.status::text, t.completion_criterion, execution.executed_at, execution.result, "
-        + "execution.observations from task t join deposit d on d.id = t.deposit_id "
+        + "t.status::text, t.completion_criterion, t.description, execution.executed_at, execution.result, "
+        + "execution.observations, execution.sample_point, execution.sample_code "
+        + "from task t join deposit d on d.id = t.deposit_id "
         + "left join content_unit cu on cu.id = t.content_unit_id "
         + "left join app_user u on u.id = t.responsible_id "
-        + "left join lateral (select executed_at, result, observations from task_execution "
-        + "where task_id = t.id order by executed_at desc limit 1) execution on true";
+        + "left join lateral (select te.executed_at, te.result, te.observations, te.sample_point, s.code as sample_code "
+        + "from task_execution te left join sample s on s.id = te.sample_id "
+        + "where te.task_id = t.id order by te.executed_at desc limit 1) execution on true";
 
     private record TaskLock(UUID id, UUID depositId, UUID contentId, UUID responsibleId,
                             String status, String completionCriterion) {}
