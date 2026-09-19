@@ -433,14 +433,21 @@ public class TrackingService {
                 reading.takenAt(), ChronoUnit.DAYS.between(reading.takenAt(), now), raw.validated(), reading.sampleCode()));
         }
         Map<UUID, String> phases = alcoholicPhases(ids);
+        List<Target> allTargets = targets.all();
         List<LatestContent> out = new ArrayList<>();
         for (ContentRow row : rows.values()) {
             Active current = active.get(row.id());
             List<LatestReading> readings = new ArrayList<>(byContent.getOrDefault(row.id(), List.of()));
             readings.sort(Comparator.comparing(LatestReading::name));
+            // Ranges that apply to this content, so a caller can colour readings without admin access to the targets.
+            List<TargetRange> ranges = new ArrayList<>();
+            for (LatestReading reading : readings) {
+                Target target = ParameterTargetService.resolve(allTargets, reading.parameter(), row.categoryCode(), phases.get(row.id()));
+                if (target != null) ranges.add(new TargetRange(row.code(), reading.parameter(), target.warnMin(), target.warnMax(), target.critMin(), target.critMax()));
+            }
             out.add(new LatestContent(row.code(), current == null ? null : current.deposit(),
                 current == null ? null : current.capacity(), row.lot(), row.categoryCode(), row.category(),
-                current == null ? null : current.volume(), phases.get(row.id()), readings));
+                current == null ? null : current.volume(), phases.get(row.id()), readings, ranges));
         }
         return out;
     }

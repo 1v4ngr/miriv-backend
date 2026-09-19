@@ -51,7 +51,7 @@ public final class TrackingDto {
     /** Latest reading of every parameter of one content, plus what the blend simulator needs. */
     public record LatestContent(String content, String deposit, BigDecimal depositUsefulCapacityLiters, String lot,
                                 String categoryCode, String category, BigDecimal volumeLiters, String alcoholicState,
-                                List<LatestReading> readings) {}
+                                List<LatestReading> readings, List<TargetRange> targets) {}
 
     public record LatestReading(String parameter, String name, String unit, int decimals, BigDecimal value,
                                 String qualifier, BigDecimal limit, Instant takenAt, long daysAgo, boolean validated,

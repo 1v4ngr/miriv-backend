@@ -190,6 +190,8 @@ class TrackingServiceTest extends IntegrationTest {
         assertEquals(0, new BigDecimal("0.72").compareTo(acidity.value()));      // the newest, not 0.30
         assertEquals(0L, acidity.daysAgo());
         assertTrue(content.readings().stream().anyMatch(r -> r.parameter().equals("PH")));
+        assertTrue(content.targets().stream().anyMatch(t -> t.parameter().equals("VOLATILE_ACIDITY") && t.warnMax().compareTo(new BigDecimal("0.6")) == 0),
+            "the acidity range that applies to this content comes with it");
         assertThrows(BusinessRuleException.class, () -> tracking.latest(List.of()));
     }
 
