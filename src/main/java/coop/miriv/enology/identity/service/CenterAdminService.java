@@ -59,7 +59,7 @@ public class CenterAdminService {
         Integer refs = jdbc.queryForObject("select (select count(*) from app_user where center_id = ?) "
             + "+ (select count(*) from zone where center_id = ?) + (select count(*) from deposit where center_id = ?)",
             Integer.class, id, id, id);
-        if (refs != null && refs > 0) throw new ConflictException("El centro sigue siendo referenciado por usuarios, zonas o depósitos.");
+        if (refs != null && refs > 0) throw new ConflictException("CENTER_NOT_EMPTY", "El centro tiene usuarios, zonas o depósitos. Un superadministrador puede eliminarlo con todo su contenido.");
         jdbc.update("delete from center where id = ?", id);
         audit.record("center", id, "CENTER_DELETED", code);
     }
