@@ -118,7 +118,7 @@ public class TrackingService {
         for (Map.Entry<UUID, ContentRow> entry : rows.entrySet()) {
             for (ParameterInfo parameter : parameters) {
                 Target target = ParameterTargetService.resolve(allTargets, parameter.code(), entry.getValue().categoryCode(),
-                    phases.get(entry.getKey()));
+                    phases.get(entry.getKey()), entry.getValue().code());
                 if (target != null) {
                     ranges.add(new TargetRange(entry.getValue().code(), parameter.code(), target.warnMin(), target.warnMax(),
                         target.critMin(), target.critMax()));
@@ -318,7 +318,7 @@ public class TrackingService {
             for (ParameterInfo parameter : parameters) {
                 List<Reading> pair = readings.getOrDefault(active.id() + "|" + parameter.code(), List.of());
                 if (pair.isEmpty()) { cells.add(new OverviewCell(parameter.code(), null, null, null)); continue; }
-                Target range = ParameterTargetService.resolve(allTargets, parameter.code(), active.categoryCode(), phase);
+                Target range = ParameterTargetService.resolve(allTargets, parameter.code(), active.categoryCode(), phase, active.content());
                 Reading latest = withStatus(pair.get(0), range, now);
                 Reading previous = pair.size() > 1 ? withStatus(pair.get(1), range, now) : null;
                 worst = Math.max(worst, rank(latest.status()));
@@ -442,7 +442,7 @@ public class TrackingService {
             // Ranges that apply to this content, so a caller can colour readings without admin access to the targets.
             List<TargetRange> ranges = new ArrayList<>();
             for (LatestReading reading : readings) {
-                Target target = ParameterTargetService.resolve(allTargets, reading.parameter(), row.categoryCode(), phases.get(row.id()));
+                Target target = ParameterTargetService.resolve(allTargets, reading.parameter(), row.categoryCode(), phases.get(row.id()), row.code());
                 if (target != null) ranges.add(new TargetRange(row.code(), reading.parameter(), target.warnMin(), target.warnMax(), target.critMin(), target.critMax()));
             }
             out.add(new LatestContent(row.code(), current == null ? null : current.deposit(),

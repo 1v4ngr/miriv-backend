@@ -42,10 +42,10 @@ public final class TrackingDto {
     public record OverviewResponse(List<ParameterInfo> parameters, List<OverviewRow> rows) {}
 
     public record TargetView(UUID id, String parameter, String parameterName, String unit, String categoryCode,
-                             String categoryName, String phase, BigDecimal warnMin, BigDecimal warnMax,
+                             String categoryName, String phase, String contentCode, BigDecimal warnMin, BigDecimal warnMax,
                              BigDecimal critMin, BigDecimal critMax, String note) {}
 
-    public record TargetRequest(String parameter, String categoryCode, String phase, BigDecimal warnMin,
+    public record TargetRequest(String parameter, String categoryCode, String phase, String contentCode, BigDecimal warnMin,
                                 BigDecimal warnMax, BigDecimal critMin, BigDecimal critMax, String note) {}
 
     /** Latest reading of every parameter of one content, plus what the blend simulator needs. */
@@ -56,4 +56,19 @@ public final class TrackingDto {
     public record LatestReading(String parameter, String name, String unit, int decimals, BigDecimal value,
                                 String qualifier, BigDecimal limit, Instant takenAt, long daysAgo, boolean validated,
                                 String sampleCode) {}
+
+    // ------------------------------------------------------------------ alerts
+
+    /** LTE / GTE compare the latest value; STABLE: values of the last `days` days vary by at most `tolerance`. */
+    public record AlertCondition(String parameter, String type, BigDecimal value, Integer days, BigDecimal tolerance) {}
+
+    public record AlertRuleView(UUID id, String name, String severity, List<AlertCondition> conditions, String categoryCode,
+                                String categoryName, String contentCode, List<String> phases, boolean active) {}
+
+    public record AlertRuleRequest(String name, String severity, List<AlertCondition> conditions, String categoryCode,
+                                   String contentCode, List<String> phases, Boolean active) {}
+
+    /** A rule that currently holds for a tank and has not been acknowledged for the sample that triggered it. */
+    public record AlertView(UUID ruleId, String rule, String severity, String content, String deposit, String category,
+                            Instant since, String sampleCode, String detail) {}
 }

@@ -206,20 +206,20 @@ class TrackingServiceTest extends IntegrationTest {
 
     @Test
     void targetsResolveMostSpecificAndEvaluateQualifiedResults() {
-        Target global = new Target("PH", null, null, null, new BigDecimal("3.8"), null, new BigDecimal("4.0"));
-        Target red = new Target("PH", "RED", null, null, new BigDecimal("3.7"), null, new BigDecimal("3.9"));
-        Target redEnd = new Target("PH", "RED", "Terminada", null, new BigDecimal("3.6"), null, new BigDecimal("3.9"));
+        Target global = new Target("PH", null, null, null, null, new BigDecimal("3.8"), null, new BigDecimal("4.0"));
+        Target red = new Target("PH", "RED", null, null, null, new BigDecimal("3.7"), null, new BigDecimal("3.9"));
+        Target redEnd = new Target("PH", "RED", "Terminada", null, null, new BigDecimal("3.6"), null, new BigDecimal("3.9"));
         var all = List.of(global, red, redEnd);
-        assertEquals(redEnd, ParameterTargetService.resolve(all, "PH", "RED", "terminada"));
-        assertEquals(red, ParameterTargetService.resolve(all, "PH", "RED", "En curso"));
-        assertEquals(global, ParameterTargetService.resolve(all, "PH", "WHITE", null));
-        assertNull(ParameterTargetService.resolve(all, "DENSITY", "RED", null));
+        assertEquals(redEnd, ParameterTargetService.resolve(all, "PH", "RED", "terminada", null));
+        assertEquals(red, ParameterTargetService.resolve(all, "PH", "RED", "En curso", null));
+        assertEquals(global, ParameterTargetService.resolve(all, "PH", "WHITE", null, null));
+        assertNull(ParameterTargetService.resolve(all, "DENSITY", "RED", null, null));
 
         assertEquals("OK", ParameterTargetService.evaluate(new BigDecimal("3.5"), "NONE", null, global));
         assertEquals("WARN", ParameterTargetService.evaluate(new BigDecimal("3.9"), "NONE", null, global));
         assertEquals("CRIT", ParameterTargetService.evaluate(new BigDecimal("4.2"), "NONE", null, global));
         assertEquals("NONE", ParameterTargetService.evaluate(new BigDecimal("3.5"), "NONE", null, null));
-        Target sulfur = new Target("FREE_SO2", null, null, new BigDecimal("15"), null, new BigDecimal("8"), null);
+        Target sulfur = new Target("FREE_SO2", null, null, null, new BigDecimal("15"), null, new BigDecimal("8"), null);
         assertEquals("CRIT", ParameterTargetService.evaluate(null, "LESS_THAN", new BigDecimal("5"), sulfur));
         assertEquals("UNKNOWN", ParameterTargetService.evaluate(null, "LESS_THAN", new BigDecimal("20"), sulfur));
         assertEquals("NONE", ParameterTargetService.evaluate(null, "NOT_MEASURED", null, sulfur));
@@ -227,16 +227,16 @@ class TrackingServiceTest extends IntegrationTest {
 
     @Test
     void targetsAreEditableAndValidated() {
-        var created = targets.create(new TargetRequest("DENSITY", "RED", "En curso", null, new BigDecimal("1.02"), null,
+        var created = targets.create(new TargetRequest("DENSITY", "RED", "En curso", null, null, new BigDecimal("1.02"), null,
             new BigDecimal("1.10"), "prueba"));
         assertEquals("Densidad", created.parameterName());
-        assertThrows(ConflictException.class, () -> targets.create(new TargetRequest("DENSITY", "RED", "En curso", null,
+        assertThrows(ConflictException.class, () -> targets.create(new TargetRequest("DENSITY", "RED", "En curso", null, null,
             new BigDecimal("1.01"), null, null, null)));
-        assertThrows(BusinessRuleException.class, () -> targets.create(new TargetRequest("DENSITY", null, null, null,
+        assertThrows(BusinessRuleException.class, () -> targets.create(new TargetRequest("DENSITY", null, null, null, null,
             new BigDecimal("1.20"), null, new BigDecimal("1.10"), null)));   // warn above crit
-        assertThrows(BusinessRuleException.class, () -> targets.create(new TargetRequest("DENSITY", null, "Nada", null,
+        assertThrows(BusinessRuleException.class, () -> targets.create(new TargetRequest("DENSITY", null, "Nada", null, null,
             null, null, null, null)));                                       // no limit at all
-        var updated = targets.update(created.id(), new TargetRequest("DENSITY", "RED", "En curso", null,
+        var updated = targets.update(created.id(), new TargetRequest("DENSITY", "RED", "En curso", null, null,
             new BigDecimal("1.05"), null, new BigDecimal("1.10"), null));
         assertEquals(0, new BigDecimal("1.05").compareTo(updated.warnMax()));
         targets.delete(created.id());
