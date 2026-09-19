@@ -129,7 +129,7 @@ public class LaboratoryService {
         for (ResultInput input : request.results()) {
             if ((input.value() == null || input.value().isBlank())
                 && (input.qualifier() == null || input.qualifier().isBlank())) continue;
-            Parameter parameter = parameter(input.parameter());
+            Parameter parameter = parameter(input.parameter(), sample.panelId());
             if (!Boolean.TRUE.equals(jdbc.queryForObject("select exists(select 1 from analysis_panel_parameter "
                 + "where panel_id = ? and parameter_id = ?)", Boolean.class, sample.panelId(), parameter.id()))) {
                 throw new BusinessRuleException("El parámetro no forma parte del panel seleccionado: " + input.parameter());
@@ -187,7 +187,7 @@ public class LaboratoryService {
     public SampleResponse correct(String code, String parameterName, CorrectionRequest request) {
         SampleRow sample = findForUpdate(code);
         if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Un análisis invalidado no se puede corregir.");
-        Parameter parameter = parameter(parameterName);
+        Parameter parameter = parameter(parameterName, sample.panelId());
         List<UUID> current = jdbc.query("select id from result where analysis_id = ? and parameter_id = ? "
                 + "and is_current = true for update", (rs, index) -> rs.getObject(1, UUID.class),
             sample.analysisId(), parameter.id());
@@ -322,11 +322,19 @@ public class LaboratoryService {
             rs.getString("validation_note"));
     }
 
-    private Parameter parameter(String value) {
+    /**
+     * Resolves a parameter by name, code or legacy alias. A label can match more than one parameter
+     * (e.g. "Ácido málico" is MALIC_ACID by name and L_MALIC_ACID by alias), so the one in the
+     * sample's panel wins, then an exact name match, then the alias.
+     */
+    private Parameter parameter(String value, UUID panelId) {
         String code = PARAMETER_ALIASES.getOrDefault(value, value);
-        List<Parameter> rows = jdbc.query("select id, code from parameter where lower(name) = lower(?) "
-                + "or lower(code) = lower(?)", (rs, index) -> new Parameter(rs.getObject(1, UUID.class), rs.getString(2)),
-            value.trim(), code.trim());
+        List<Parameter> rows = jdbc.query("select p.id, p.code from parameter p where lower(p.name) = lower(?) "
+                + "or lower(p.code) = lower(?) "
+                + "order by exists(select 1 from analysis_panel_parameter app where app.panel_id = ? and app.parameter_id = p.id) desc, "
+                + "(lower(p.name) = lower(?)) desc",
+            (rs, index) -> new Parameter(rs.getObject(1, UUID.class), rs.getString(2)),
+            value.trim(), code.trim(), panelId, value.trim());
         if (rows.isEmpty()) throw new NotFoundException("Parámetro no encontrado: " + value);
         return rows.getFirst();
     }

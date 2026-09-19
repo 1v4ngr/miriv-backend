@@ -126,7 +126,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
             List.of(new ResultInput("pH", "3,42", "", null, null)), "Borrador",
             LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals(1, updated.completed());
-        assertEquals(8, updated.panelParameters().size());
+        assertEquals(10, updated.panelParameters().size()); // 8 + MALIC_ACID and TOTAL_ACIDITY_TH2 (V27)
         assertThrows(BusinessRuleException.class, () -> laboratory.validate(sampleCode, "Reviewed"));
         var complete = laboratory.saveResults(sampleCode, new ResultsRequest(List.of(
             new ResultInput("pH", "3,42", "", null, null),
@@ -136,7 +136,10 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
             new ResultInput("Etanol", "12,4", "% vol.", null, null),
             new ResultInput("Glucosa más fructosa", "3,1", "g/L", null, null),
             new ResultInput("Acidez total", "5,4", "g/L como tartárico", null, null),
-            new ResultInput("CO2 disuelto", "850", "mg/L", null, null)),
+            new ResultInput("CO2 disuelto", "850", "mg/L", null, null),
+            // "Ácido málico" is also a legacy alias of L_MALIC_ACID: the Control panel's MALIC_ACID must win.
+            new ResultInput("Ácido málico", "1,81", "g/L", null, null),
+            new ResultInput("Acidez total TH2", "6,54", "g/L como tartárico", null, null)),
             "Pendiente validar", LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals("Pendiente validar", complete.status());
         assertEquals("Validado", laboratory.validate(sampleCode, "Reviewed").status());
