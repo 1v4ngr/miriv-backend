@@ -22,5 +22,9 @@ public record MovementRequest(
     // F2-06: client-supplied expected balances; if they differ from the current
     // balances, the server responds 409 STALE_BALANCE instead of writing.
     BigDecimal expectedSourceLiters,
-    BigDecimal expectedDestinationLiters
+    BigDecimal expectedDestinationLiters,
+    // F4-01: if true, the movement is registered as PLANNED: no occupation/content_unit
+    // changes, the body is stored as planned_request for later execution. Requires
+    // MOVEMENT_PLAN permission; capacity and stale-balance checks are skipped.
+    boolean planned
 ) {}

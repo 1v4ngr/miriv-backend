@@ -96,7 +96,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         LocalDateTime movementTime = LocalDateTime.now(TIMEZONE).minusHours(1);
         var movement = movements.register(new MovementRequest("Trasiego", movementTime.toLocalDate(),
             movementTime.toLocalTime().withNano(0), "enologo", "Routine transfer", source, target,
-            new BigDecimal("300"), new BigDecimal("10"), "test-" + suffix, false, null, null));
+            new BigDecimal("300"), new BigDecimal("10"), "test-" + suffix, false, null, null, false));
         assertEquals(0, movement.sourceFinalLiters().compareTo(new BigDecimal("690")));
         assertEquals(0, movement.destinationFinalLiters().compareTo(new BigDecimal("300")));
         var transferred = deposits.get(target);
@@ -162,7 +162,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         LocalDateTime exitTime = LocalDateTime.now(TIMEZONE).minusMinutes(20);
         movements.register(new MovementRequest("Salida", exitTime.toLocalDate(),
             exitTime.toLocalTime().withNano(0), "enologo", "Final dispatch", source, null,
-            new BigDecimal("690"), BigDecimal.ZERO, "exit-" + suffix, false, null, null));
+            new BigDecimal("690"), BigDecimal.ZERO, "exit-" + suffix, false, null, null, false));
         cleaning.start(source);
         cleaning.complete(source, new CompleteCleaningRequest("Wash and inspect", "Passed", "No residue", true));
         var corrected = laboratory.correct(sampleCode, "pH", new CorrectionRequest("3,40", "Instrument calibration"));
