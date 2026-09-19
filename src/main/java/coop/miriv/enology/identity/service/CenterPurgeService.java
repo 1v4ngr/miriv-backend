@@ -134,6 +134,7 @@ public class CenterPurgeService {
 
     /** Users with other centers just lose this one; users with no other center are removed. */
     private List<String> removeUsers(UUID centerId) {
+        // user_dashboard rows go with the user (ON DELETE CASCADE).
         // Users that keep other centers: move their primary center if it was this one.
         jdbc.update("""
             update app_user u set center_id = (select uc.center_id from app_user_center uc
