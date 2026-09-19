@@ -22,7 +22,7 @@ public class TrackingController {
     public TrackingController(TrackingService service) { this.service = service; }
 
     @GetMapping("/parameters")
-    public List<ParameterInfo> parameters() { return service.parameters(); }
+    public List<ParameterInfo> parameters(@RequestParam(defaultValue = "false") boolean all) { return service.parameters(all); }
 
     @GetMapping("/series")
     public SeriesResponse series(@RequestParam List<String> contents, @RequestParam List<String> parameters,

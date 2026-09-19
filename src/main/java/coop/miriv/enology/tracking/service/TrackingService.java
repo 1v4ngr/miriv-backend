@@ -44,7 +44,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class TrackingService {
 
     static final int MAX_CONTENTS = 40;
-    static final int MAX_PARAMETERS = 12;
+    static final int MAX_PARAMETERS = 30;
     private static final int MAX_ANCESTOR_DEPTH = 8;
     private static final List<String> DEFAULT_OVERVIEW_PARAMETERS = List.of("DENSITY", "REDUCING_SUGARS", "ETHANOL",
         "TOTAL_ACIDITY", "VOLATILE_ACIDITY", "PH", "FREE_SO2", "L_MALIC_ACID");
@@ -61,9 +61,11 @@ public class TrackingService {
 
     // ------------------------------------------------------------------ parameters
 
-    public List<ParameterInfo> parameters() {
+    /** Parameters that have at least one current result, or the whole catalog when {@code all} (for target setup). */
+    public List<ParameterInfo> parameters(boolean all) {
         return jdbc.query("select p.code, p.name, p.reference_unit, p.decimal_places from parameter p "
-                + "where exists (select 1 from result r where r.parameter_id = p.id and r.is_current) order by p.name",
+                + (all ? "" : "where exists (select 1 from result r where r.parameter_id = p.id and r.is_current) ")
+                + "order by p.name",
             (rs, n) -> new ParameterInfo(rs.getString(1), rs.getString(2), rs.getString(3), rs.getInt(4)));
     }
 
