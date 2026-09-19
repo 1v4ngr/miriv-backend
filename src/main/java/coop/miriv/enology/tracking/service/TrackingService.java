@@ -4,6 +4,8 @@ import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.identity.service.CurrentUserContext.ZoneFilter;
 import coop.miriv.enology.tracking.dto.TrackingDto.ContentInfo;
+import coop.miriv.enology.tracking.dto.TrackingDto.LatestContent;
+import coop.miriv.enology.tracking.dto.TrackingDto.LatestReading;
 import coop.miriv.enology.tracking.dto.TrackingDto.Event;
 import coop.miriv.enology.tracking.dto.TrackingDto.OverviewCell;
 import coop.miriv.enology.tracking.dto.TrackingDto.OverviewResponse;
@@ -302,27 +304,8 @@ public class TrackingService {
 
         // Latest two readings per content and parameter, in one query.
         Map<String, List<Reading>> readings = new HashMap<>();
-        if (!parameters.isEmpty()) {
-            List<Object> readingArgs = new ArrayList<>(ids);
-            parameters.forEach(parameter -> readingArgs.add(parameter.code()));
-            jdbc.query("""
-                select * from (
-                  select s.content_unit_id, p.code param_code, s.taken_at, r.numeric_value, r.qualifier::text qualifier,
-                         r.qualifier_limit, s.code sample_code,
-                         row_number() over (partition by s.content_unit_id, r.parameter_id
-                                            order by s.taken_at desc, r.created_at desc) rn
-                    from result r
-                    join analysis a on a.id = r.analysis_id
-                    join sample s on s.id = a.sample_id
-                    join parameter p on p.id = r.parameter_id
-                   where r.is_current and a.status <> 'INVALIDATED'::analysis_status
-                     and s.content_unit_id in (""" + marks(ids.size()) + ") and p.code in (" + marks(parameters.size()) + """
-                  )) t where rn <= 2 order by rn""", (RowCallback) rs -> {
-                String key = rs.getObject("content_unit_id", UUID.class) + "|" + rs.getString("param_code");
-                readings.computeIfAbsent(key, k -> new ArrayList<>()).add(new Reading(rs.getBigDecimal("numeric_value"),
-                    rs.getString("qualifier"), rs.getBigDecimal("qualifier_limit"), instant(rs, "taken_at"),
-                    rs.getString("sample_code"), null, null));
-            }, readingArgs.toArray());
+        for (RawReading raw : latestReadings(ids, parameters.stream().map(ParameterInfo::code).toList(), 2)) {
+            readings.computeIfAbsent(raw.contentId() + "|" + raw.parameter(), k -> new ArrayList<>()).add(raw.reading());
         }
 
         List<Target> allTargets = targets.all();
@@ -378,6 +361,88 @@ public class TrackingService {
 
     private static String statusName(int rank) {
         return switch (rank) { case 3 -> "CRIT"; case 2 -> "WARN"; case 1 -> "OK"; default -> "NONE"; };
+    }
+
+
+    /** One current, non-invalidated result with the sample it came from (rn = 1 is the most recent). */
+    private record RawReading(UUID contentId, String parameter, Reading reading, boolean validated) {}
+
+    /**
+     * Latest {@code perParameter} readings per content and parameter, most recent first, in a single query.
+     * An empty {@code parameterCodes} means every parameter.
+     */
+    private List<RawReading> latestReadings(Set<UUID> contentIds, List<String> parameterCodes, int perParameter) {
+        if (contentIds.isEmpty()) return List.of();
+        List<Object> args = new ArrayList<>(contentIds);
+        StringBuilder sql = new StringBuilder("""
+            select * from (
+              select s.content_unit_id, p.code param_code, s.taken_at, r.numeric_value, r.qualifier::text qualifier,
+                     r.qualifier_limit, r.validated, s.code sample_code,
+                     row_number() over (partition by s.content_unit_id, r.parameter_id
+                                        order by s.taken_at desc, r.created_at desc) rn
+                from result r
+                join analysis a on a.id = r.analysis_id
+                join sample s on s.id = a.sample_id
+                join parameter p on p.id = r.parameter_id
+               where r.is_current and a.status <> 'INVALIDATED'::analysis_status
+            """);
+        sql.append(" and s.content_unit_id in (").append(marks(contentIds.size())).append(")");
+        if (!parameterCodes.isEmpty()) {
+            sql.append(" and p.code in (").append(marks(parameterCodes.size())).append(")");
+            args.addAll(parameterCodes);
+        }
+        sql.append(") t where rn <= ").append(perParameter).append(" order by rn");
+        List<RawReading> out = new ArrayList<>();
+        jdbc.query(sql.toString(), (RowCallback) rs -> out.add(new RawReading(rs.getObject("content_unit_id", UUID.class),
+            rs.getString("param_code"), new Reading(rs.getBigDecimal("numeric_value"), rs.getString("qualifier"),
+                rs.getBigDecimal("qualifier_limit"), instant(rs, "taken_at"), rs.getString("sample_code"), null, null),
+            rs.getBoolean("validated"))), args.toArray());
+        return out;
+    }
+
+    // ------------------------------------------------------------------ latest (KPI, blend simulator)
+
+    /** Latest reading of every parameter of the given contents, plus volume and deposit capacity. */
+    public List<LatestContent> latest(List<String> contentCodes) {
+        contentCodes = clean(contentCodes);
+        if (contentCodes.isEmpty()) throw new BusinessRuleException("Elige al menos un contenido.");
+        if (contentCodes.size() > MAX_CONTENTS) throw new BusinessRuleException("Máximo " + MAX_CONTENTS + " contenidos a la vez.");
+        Map<UUID, ContentRow> rows = loadContents("c.code", contentCodes);
+        if (rows.isEmpty()) return List.of();
+        Set<UUID> ids = rows.keySet();
+
+        record Active(String deposit, BigDecimal capacity, BigDecimal volume) {}
+        Map<UUID, Active> active = new HashMap<>();
+        jdbc.query("select o.content_unit_id, d.code, d.useful_capacity_liters, o.volume_liters from occupation o "
+                + "join deposit d on d.id = o.deposit_id where o.end_at is null and o.content_unit_id in ("
+                + marks(ids.size()) + ")", (RowCallback) rs -> active.put(rs.getObject(1, UUID.class),
+            new Active(rs.getString(2), rs.getBigDecimal(3), rs.getBigDecimal(4))), ids.toArray());
+
+        Map<String, ParameterInfo> catalog = new HashMap<>();
+        jdbc.query("select code, name, reference_unit, decimal_places from parameter", (RowCallback) rs ->
+            catalog.put(rs.getString(1), new ParameterInfo(rs.getString(1), rs.getString(2), rs.getString(3), rs.getInt(4))));
+
+        Map<UUID, List<LatestReading>> byContent = new HashMap<>();
+        Instant now = Instant.now();
+        for (RawReading raw : latestReadings(ids, List.of(), 1)) {
+            ParameterInfo parameter = catalog.get(raw.parameter());
+            if (parameter == null) continue;
+            Reading reading = raw.reading();
+            byContent.computeIfAbsent(raw.contentId(), k -> new ArrayList<>()).add(new LatestReading(parameter.code(),
+                parameter.name(), parameter.unit(), parameter.decimals(), reading.value(), reading.qualifier(), reading.limit(),
+                reading.takenAt(), ChronoUnit.DAYS.between(reading.takenAt(), now), raw.validated(), reading.sampleCode()));
+        }
+        Map<UUID, String> phases = alcoholicPhases(ids);
+        List<LatestContent> out = new ArrayList<>();
+        for (ContentRow row : rows.values()) {
+            Active current = active.get(row.id());
+            List<LatestReading> readings = new ArrayList<>(byContent.getOrDefault(row.id(), List.of()));
+            readings.sort(Comparator.comparing(LatestReading::name));
+            out.add(new LatestContent(row.code(), current == null ? null : current.deposit(),
+                current == null ? null : current.capacity(), row.lot(), row.categoryCode(), row.category(),
+                current == null ? null : current.volume(), phases.get(row.id()), readings));
+        }
+        return out;
     }
 
     // ------------------------------------------------------------------ shared helpers

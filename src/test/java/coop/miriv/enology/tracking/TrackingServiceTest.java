@@ -178,6 +178,22 @@ class TrackingServiceTest extends IntegrationTest {
     }
 
     @Test
+    void latestReturnsEveryParameterWithVolumeAndCapacity() {
+        var latest = tracking.latest(List.of("C-T1"));
+
+        assertEquals(1, latest.size());
+        var content = latest.getFirst();
+        assertEquals("D-T1", content.deposit());
+        assertEquals(0, new BigDecimal("1000").compareTo(content.volumeLiters()));
+        assertEquals(0, new BigDecimal("10000").compareTo(content.depositUsefulCapacityLiters()));
+        var acidity = content.readings().stream().filter(r -> r.parameter().equals("VOLATILE_ACIDITY")).findFirst().orElseThrow();
+        assertEquals(0, new BigDecimal("0.72").compareTo(acidity.value()));      // the newest, not 0.30
+        assertEquals(0L, acidity.daysAgo());
+        assertTrue(content.readings().stream().anyMatch(r -> r.parameter().equals("PH")));
+        assertThrows(BusinessRuleException.class, () -> tracking.latest(List.of()));
+    }
+
+    @Test
     void contentsOutsideTheReadableZonesAreInvisible() {
         assertEquals(2, tracking.series(List.of("C-T1", "C-T2"), List.of("PH"), null, null, false).contents().size());
         actAs("operario");   // CELLAR_OPERATOR limited to zone NAVE-A: does not cover Z-TRK

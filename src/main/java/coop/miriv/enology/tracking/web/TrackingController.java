@@ -1,6 +1,7 @@
 package coop.miriv.enology.tracking.web;
 
 import coop.miriv.enology.tracking.dto.TrackingDto.Event;
+import coop.miriv.enology.tracking.dto.TrackingDto.LatestContent;
 import coop.miriv.enology.tracking.dto.TrackingDto.OverviewResponse;
 import coop.miriv.enology.tracking.dto.TrackingDto.ParameterInfo;
 import coop.miriv.enology.tracking.dto.TrackingDto.SeriesResponse;
@@ -36,6 +37,9 @@ public class TrackingController {
                               @RequestParam(required = false) Instant to) {
         return service.events(contents, from, to);
     }
+
+    @GetMapping("/latest")
+    public List<LatestContent> latest(@RequestParam List<String> contents) { return service.latest(contents); }
 
     @GetMapping("/overview")
     public OverviewResponse overview(@RequestParam(required = false) List<String> parameters) {
