@@ -46,12 +46,16 @@ public class AppUserDetailsService implements UserDetailsService {
             select p.code, g.zone_id from app_user_permission_grant g
               join permission p on p.id = g.permission_id
              where g.user_id = ? and g.valid_from <= now() and (g.valid_until is null or g.valid_until > now())
+            union all
+            select p.code, cast(null as uuid) from permission p
+             where exists (select 1 from app_user_role ur join role r on r.id = ur.role_id
+                            where ur.user_id = ? and r.code = 'SUPER_ADMIN' and ur.zone_id is null)
             """, rs -> {
                 String code = rs.getString(1);
                 UUID zone = rs.getObject(2, UUID.class);
                 if (zone == null) all.put(code, true);
                 else zones.computeIfAbsent(code, key -> new HashSet<>()).add(zone);
-            }, user.getId(), user.getId());
+            }, user.getId(), user.getId(), user.getId());
         Map<String, PermissionScope> permissions = new HashMap<>();
         Stream.concat(all.keySet().stream(), zones.keySet().stream()).distinct().forEach(code ->
             permissions.put(code, new PermissionScope(all.getOrDefault(code, false), zones.getOrDefault(code, Set.of()))));

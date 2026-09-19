@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserAccountService {
 
     private static final String ADMIN_ROLE_CODE = "ADMIN";
+    static final String SUPER_ADMIN_ROLE_CODE = "SUPER_ADMIN";
 
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
@@ -57,8 +58,13 @@ public class UserAccountService {
     @Transactional
     public UserAccountResponse assignRole(UUID userId, RoleAssignmentRequest request) {
         requireNotSelf(userId, "No puedes cambiar tus propios roles: pide a otro administrador que lo haga.");
+        requireMayManage(userId);
         UUID roleId = roleId(request.roleCode());
         UUID zoneId = request.zoneId();
+        if (SUPER_ADMIN_ROLE_CODE.equals(request.roleCode())) {
+            requireActorSuperAdmin("Solo un superadministrador puede conceder el rol de superadministrador.");
+            if (zoneId != null) throw new BusinessRuleException("El rol de superadministrador no se limita a una zona.");
+        }
         if (zoneId != null) {
             UUID zoneCenter = jdbc.queryForObject("select center_id from zone where id = ?", UUID.class, zoneId);
             UUID userCenter = jdbc.queryForObject("select center_id from app_user where id = ?", UUID.class, userId);
@@ -76,10 +82,15 @@ public class UserAccountService {
     @Transactional
     public UserAccountResponse revokeRole(UUID userId, UUID roleAssignmentId) {
         requireNotSelf(userId, "No puedes cambiar tus propios roles: pide a otro administrador que lo haga.");
+        requireMayManage(userId);
         String roleCode = jdbc.query("select r.code from app_user_role ur join role r on r.id = ur.role_id "
                 + "where ur.id = ? and ur.user_id = ?", (rs, row) -> rs.getString(1), roleAssignmentId, userId)
             .stream().findFirst().orElseThrow(() -> new NotFoundException("Asignación de rol no encontrada."));
-        if (ADMIN_ROLE_CODE.equals(roleCode)) requireAnotherActiveAdminRemains(userId);
+        if (SUPER_ADMIN_ROLE_CODE.equals(roleCode)) {
+            requireActorSuperAdmin("Solo un superadministrador puede retirar el rol de superadministrador.");
+            requireAnotherActiveSuperAdminRemains(userId);
+        }
+        if (ADMIN_ROLE_CODE.equals(roleCode) || SUPER_ADMIN_ROLE_CODE.equals(roleCode)) requireAnotherActiveAdminRemains(userId);
         int updated = jdbc.update("delete from app_user_role where id = ? and user_id = ?", roleAssignmentId, userId);
         if (updated == 0) throw new NotFoundException("Asignación de rol no encontrada.");
         audit.record("app_user", userId, "ROLE_REVOKED", "Asignación " + roleAssignmentId + " (" + roleCode + ")");
@@ -89,9 +100,11 @@ public class UserAccountService {
     @Transactional
     public UserAccountResponse grantPermission(UUID userId, PermissionGrantRequest request) {
         requireNotSelf(userId, "No puedes concederte permisos a ti mismo: pide a otro administrador que lo haga.");
+        requireMayManage(userId);
         UUID permissionId = permissionId(request.permissionCode());
         Boolean grantable = jdbc.queryForObject("select grantable from permission where id = ?", Boolean.class, permissionId);
-        if (!Boolean.TRUE.equals(grantable)) {
+        // A super administrator may grant any permission individually; other admins only the grantable ones.
+        if (!Boolean.TRUE.equals(grantable) && !actorIsSuperAdmin()) {
             throw new ConflictException("Este permiso no se puede asignar individualmente a un usuario.");
         }
         UUID zoneId = request.zoneId();
@@ -114,6 +127,7 @@ public class UserAccountService {
     @Transactional
     public UserAccountResponse revokePermission(UUID userId, UUID grantId) {
         requireNotSelf(userId, "No puedes cambiar tus propias concesiones: pide a otro administrador que lo haga.");
+        requireMayManage(userId);
         Integer n = jdbc.update("delete from app_user_permission_grant where id = ? and user_id = ?", grantId, userId);
         if (n == null || n == 0) throw new NotFoundException("Otorgamiento de permiso no encontrado.");
         audit.record("app_user", userId, "REVOKE", "Concesión " + grantId);
@@ -133,7 +147,11 @@ public class UserAccountService {
 
     @Transactional
     public UserAccountResponse deactivate(UUID userId, UserAccountStatusRequest request) {
-        requireNotSelf(userId, "No puedes desactivar tu propia cuenta: pide a otro administrador que lo haga.");
+        if (userId.equals(context.userId())) {
+            throw new ConflictException("No puedes desactivar tu propia cuenta: pide a otro administrador que lo haga.");
+        }
+        requireMayManage(userId);
+        if (hasRole(userId, SUPER_ADMIN_ROLE_CODE)) requireAnotherActiveSuperAdminRemains(userId);
         if (isActiveAdmin(userId)) requireAnotherActiveAdminRemains(userId);
         int updated = jdbc.update("update app_user set active = false, deactivated_at = ? where id = ? and active = true",
             Timestamp.from(Instant.now()), userId);
@@ -144,6 +162,7 @@ public class UserAccountService {
 
     @Transactional
     public UserAccountResponse reactivate(UUID userId, UserAccountStatusRequest request) {
+        requireMayManage(userId);
         int updated = jdbc.update("update app_user set active = true, deactivated_at = null where id = ? and active = false",
             userId);
         if (updated == 0) throw new NotFoundException("Usuario no encontrado o ya estaba activo.");
@@ -153,6 +172,7 @@ public class UserAccountService {
 
     @Transactional
     public void resetPassword(UUID userId, ResetPasswordRequest request) {
+        requireMayManage(userId);
         int updated = jdbc.update("update app_user set password_hash = ? where id = ? and active = true",
             encoder.encode(request.newPassword()), userId);
         if (updated == 0) throw new NotFoundException("Usuario no encontrado o inactivo.");
@@ -160,22 +180,53 @@ public class UserAccountService {
         audit.record("app_user", userId, "PASSWORD", "Contraseña restablecida por un administrador.");
     }
 
+    /** Ordinary admins may not change their own access; a super administrator may (they already hold everything). */
     private void requireNotSelf(UUID userId, String message) {
-        if (userId.equals(context.userId())) throw new ConflictException(message);
+        if (userId.equals(context.userId()) && !actorIsSuperAdmin()) throw new ConflictException(message);
+    }
+
+    /** Only a super administrator may change the account of a super administrator. */
+    public void requireMayManage(UUID userId) {
+        if (!userId.equals(context.userId()) && hasRole(userId, SUPER_ADMIN_ROLE_CODE) && !actorIsSuperAdmin()) {
+            throw new AccessDeniedException("Solo un superadministrador puede modificar la cuenta de otro superadministrador.");
+        }
+    }
+
+    private void requireActorSuperAdmin(String message) {
+        if (!actorIsSuperAdmin()) throw new AccessDeniedException(message);
+    }
+
+    public boolean actorIsSuperAdmin() {
+        UUID actor = context.userId();
+        return actor != null && hasRole(actor, SUPER_ADMIN_ROLE_CODE);
+    }
+
+    private boolean hasRole(UUID userId, String roleCode) {
+        Boolean has = jdbc.queryForObject("select exists(select 1 from app_user_role ur "
+                + "join role r on r.id = ur.role_id where ur.user_id = ? and r.code = ?)",
+            Boolean.class, userId, roleCode);
+        return Boolean.TRUE.equals(has);
     }
 
     private boolean isActiveAdmin(UUID userId) {
-        Boolean isAdmin = jdbc.queryForObject("select exists(select 1 from app_user_role ur "
-                + "join role r on r.id = ur.role_id where ur.user_id = ? and r.code = ?)",
-            Boolean.class, userId, ADMIN_ROLE_CODE);
-        return Boolean.TRUE.equals(isAdmin);
+        return hasRole(userId, ADMIN_ROLE_CODE) || hasRole(userId, SUPER_ADMIN_ROLE_CODE);
+    }
+
+    private void requireAnotherActiveSuperAdminRemains(UUID userIdBeingChanged) {
+        Integer others = jdbc.queryForObject("select count(distinct u.id) from app_user u "
+                + "join app_user_role ur on ur.user_id = u.id join role r on r.id = ur.role_id "
+                + "where r.code = ? and u.active = true and u.id <> ?", Integer.class, SUPER_ADMIN_ROLE_CODE, userIdBeingChanged);
+        if (others == null || others == 0) {
+            throw new BusinessRuleException("Debe quedar al menos un superadministrador activo.");
+        }
     }
 
     /** Refuses the change when it would leave the cooperative with no active administrator. */
     private void requireAnotherActiveAdminRemains(UUID userIdBeingChanged) {
         Integer otherActiveAdmins = jdbc.queryForObject("select count(distinct u.id) from app_user u "
                 + "join app_user_role ur on ur.user_id = u.id join role r on r.id = ur.role_id "
-                + "where r.code = ? and u.active = true and u.id <> ?", Integer.class, ADMIN_ROLE_CODE, userIdBeingChanged);
+                + "where r.code in (?, ?) and u.active = true and u.id <> ?", Integer.class,
+            ADMIN_ROLE_CODE, SUPER_ADMIN_ROLE_CODE, userIdBeingChanged);
         if (otherActiveAdmins == null || otherActiveAdmins == 0) {
             throw new BusinessRuleException("Debe quedar al menos un administrador activo.");
         }

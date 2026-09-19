@@ -34,6 +34,8 @@ app:
       secret: ${JWT_SECRET}
       access-token-minutes: ${APP_JWT_MINUTES:30}
       issuer: miriv-enology-tracking
+    # Account that always holds SUPER_ADMIN (added on startup if missing). Empty disables it.
+    super-admin-email: ${APP_SUPER_ADMIN_EMAIL:ivangoru22@gmail.com}
   timezone: ${APP_TIMEZONE:Europe/Madrid}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174}

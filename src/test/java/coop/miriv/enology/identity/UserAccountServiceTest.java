@@ -12,7 +12,11 @@ import coop.miriv.enology.identity.dto.UserAccountResponse;
 import coop.miriv.enology.identity.dto.UserAccountStatusRequest;
 import coop.miriv.enology.identity.service.AppUserDetailsService;
 import coop.miriv.enology.identity.service.AppUserPrincipal;
+import coop.miriv.enology.identity.service.SuperAdminBootstrap;
 import coop.miriv.enology.identity.service.UserAccountService;
+import coop.miriv.enology.identity.dto.ResetPasswordRequest;
+import org.springframework.security.access.AccessDeniedException;
+import java.util.HashSet;
 import coop.miriv.enology.support.IntegrationTest;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
@@ -89,5 +93,58 @@ class UserAccountServiceTest extends IntegrationTest {
         jdbc.update("update app_user set active = false where username = 'admin'");
         assertThrows(BusinessRuleException.class, () -> accounts.revokeRole(id("produccion"), assignment));
         assertThrows(BusinessRuleException.class, () -> accounts.deactivate(id("produccion"), new UserAccountStatusRequest("Prueba")));
+    }
+
+    // --- SUPER_ADMIN -------------------------------------------------------------------------
+
+    private void makeSuperAdmin(String username) {
+        new SuperAdminBootstrap(jdbc, username + "@miriv.local").run(null);
+    }
+
+    private void actAs(String username) {
+        AppUserPrincipal principal = (AppUserPrincipal) userDetails.loadUserByUsername(username);
+        SecurityContextHolder.getContext().setAuthentication(
+            new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+    }
+
+    @Test
+    void bootstrapGivesTheConfiguredAccountEveryPermission() {
+        makeSuperAdmin("consulta");
+        makeSuperAdmin("consulta"); // idempotent
+        Integer assignments = jdbc.queryForObject("select count(*) from app_user_role ur join role r on r.id = ur.role_id "
+            + "where ur.user_id = ? and r.code = 'SUPER_ADMIN'", Integer.class, id("consulta"));
+        assertEquals(1, assignments);
+        var all = new HashSet<>(jdbc.queryForList("select code from permission", String.class));
+        var principal = (AppUserPrincipal) userDetails.loadUserByUsername("consulta");
+        assertEquals(all, principal.getPermissions().keySet());
+        assertTrue(principal.getPermissions().values().stream().allMatch(scope -> scope.allZones()));
+    }
+
+    @Test
+    void ordinaryAdminCannotGrantOrTouchSuperAdmins() {
+        assertThrows(AccessDeniedException.class, () -> accounts.assignRole(id("enologo"), new RoleAssignmentRequest("SUPER_ADMIN", null)));
+        makeSuperAdmin("enologo");
+        assertThrows(AccessDeniedException.class, () -> accounts.resetPassword(id("enologo"), new ResetPasswordRequest("OtraClave12345")));
+        assertThrows(AccessDeniedException.class, () -> accounts.deactivate(id("enologo"), new UserAccountStatusRequest("Prueba")));
+    }
+
+    @Test
+    void superAdminCanGrantAnythingIncludingToThemselves() {
+        makeSuperAdmin("enologo");
+        actAs("enologo");
+        accounts.assignRole(id("admin"), new RoleAssignmentRequest("SUPER_ADMIN", null));
+        var self = accounts.grantPermission(id("enologo"), new PermissionGrantRequest("STATE_CONFIRM", null, "Prueba", null, null));
+        assertTrue(self.grants().stream().anyMatch(grant -> grant.permissionCode().equals("STATE_CONFIRM")));
+        accounts.assignRole(id("enologo"), new RoleAssignmentRequest("LABORATORY", null));
+    }
+
+    @Test
+    void theLastSuperAdminCannotBeRemoved() {
+        makeSuperAdmin("enologo");
+        actAs("enologo");
+        UUID assignment = jdbc.queryForObject("select ur.id from app_user_role ur join role r on r.id = ur.role_id "
+            + "where ur.user_id = ? and r.code = 'SUPER_ADMIN'", UUID.class, id("enologo"));
+        assertThrows(BusinessRuleException.class, () -> accounts.revokeRole(id("enologo"), assignment));
+        assertThrows(ConflictException.class, () -> accounts.deactivate(id("enologo"), new UserAccountStatusRequest("Prueba")));
     }
 }

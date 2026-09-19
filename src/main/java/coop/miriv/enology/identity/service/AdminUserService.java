@@ -15,11 +15,14 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 
 @Service
 public class AdminUserService {
+
+    private final UserAccountService accounts;
     private final JdbcTemplate jdbc;
     private final PasswordEncoder encoder;
     private final AuditService audit;
 
-    public AdminUserService(JdbcTemplate jdbc, PasswordEncoder encoder, AuditService audit) {
+    public AdminUserService(JdbcTemplate jdbc, PasswordEncoder encoder, AuditService audit, UserAccountService accounts) {
+        this.accounts = accounts;
         this.jdbc = jdbc;
         this.encoder = encoder;
         this.audit = audit;
@@ -33,6 +36,10 @@ public class AdminUserService {
         r.centerCodes().forEach(c->jdbc.update("insert into app_user_center(user_id,center_id) select ?,id from center where code=?",id,c));
         // A user is never created without any role (B5): default to VIEWER if none were requested.
         List<String> roleCodes = r.roleCodes() == null || r.roleCodes().isEmpty() ? List.of("VIEWER") : r.roleCodes();
+        if (roleCodes.contains(UserAccountService.SUPER_ADMIN_ROLE_CODE) && !accounts.actorIsSuperAdmin()) {
+            throw new org.springframework.security.access.AccessDeniedException(
+                "Solo un superadministrador puede crear otro superadministrador.");
+        }
         for (String roleCode : roleCodes) {
             jdbc.update("insert into app_user_role(id, user_id, role_id) select ?, ?, id from role where code = ?",
                 UUID.randomUUID(), id, roleCode);
@@ -55,6 +62,7 @@ public class AdminUserService {
         UUID userId = jdbc.query("select id from app_user where lower(username) = lower(?) and active = true",
             (rs, row) -> rs.getObject(1, UUID.class), username).stream().findFirst()
             .orElseThrow(() -> new NotFoundException("Usuario no encontrado."));
+        accounts.requireMayManage(userId);
         List<String> normalized = centerCodes.stream().map(String::trim).filter(s -> !s.isBlank()).distinct().toList();
         if (normalized.isEmpty()) throw new BusinessRuleException("Es obligatorio al menos un centro.");
         String placeholders = String.join(",", normalized.stream().map(code -> "?").toList());
