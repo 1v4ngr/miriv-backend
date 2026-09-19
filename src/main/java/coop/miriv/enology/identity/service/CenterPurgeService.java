@@ -84,6 +84,7 @@ public class CenterPurgeService {
         jdbc.update("update app_user set center_id = ? where id in (select id from p_super) and center_id = ?", fallback, centerId);
 
         String[] statements = {
+            "delete from blend_simulation where task_id in (select id from p_task)",
             "delete from task_execution where task_id in (select id from p_task) or sample_id in (select id from p_sample)",
             "delete from task where id in (select id from p_task)",
             "delete from incident_evidence where incident_id in (select id from p_inc) or sample_id in (select id from p_sample) "
@@ -121,6 +122,7 @@ public class CenterPurgeService {
             "delete from laboratory where id in (select id from p_lab)",
         };
         for (String sql : statements) jdbc.update(sql);
+        jdbc.update("delete from blend_simulation where center_id = ?", centerId);
 
         List<String> deactivated = removeUsers(centerId);
         jdbc.update("delete from app_user_center where center_id = ?", centerId);

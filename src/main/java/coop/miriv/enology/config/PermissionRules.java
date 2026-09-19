@@ -36,6 +36,10 @@ public final class PermissionRules {
         rule(POST, "/api/catalogs/**", "CATALOG_MANAGE"),
         rule(PUT, "/api/catalogs/**", "CATALOG_MANAGE"),
         rule(DELETE, "/api/catalogs/**", "CATALOG_MANAGE"),
+        // Blend simulations: reads are open to any authenticated user; writes and conversion plan movements
+        rule(POST, "/api/blends/**", "MOVEMENT_PLAN"),
+        rule(PUT, "/api/blends/**", "MOVEMENT_PLAN"),
+        rule(DELETE, "/api/blends/**", "MOVEMENT_PLAN"),
         // Cellar
         rule(POST, "/api/deposits/*/cleaning/**", "DEPOSIT_CLEANING"),
         rule(POST, "/api/deposits/**", "DEPOSIT_MANAGE"),
