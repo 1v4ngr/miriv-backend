@@ -28,6 +28,7 @@ public final class PermissionRules {
         rule(null, "/api/admin/centers/**", "ORG_MANAGE"),
         rule(null, "/api/admin/zones/**", "ORG_MANAGE"),
         rule(null, "/api/admin/laboratories/**", "ORG_MANAGE"),
+        rule(null, "/api/admin/parameter-targets/**", "LAB_CATALOG_MANAGE"),
         rule(POST, "/api/catalogs/parameters/**", "LAB_CATALOG_MANAGE"),
         rule(PUT, "/api/catalogs/parameters/**", "LAB_CATALOG_MANAGE"),
         rule(POST, "/api/catalogs/panels/**", "LAB_CATALOG_MANAGE"),
