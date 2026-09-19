@@ -51,28 +51,31 @@ class CenterPurgeTest extends IntegrationTest {
         new SuperAdminBootstrap(jdbc, "admin@miriv.local").run(null);
         actAs("admin");
         assertThrows(BusinessRuleException.class, () -> purge.purge(code, "otro"));
-        // Its only center: purging would delete the acting account.
-        assertThrows(BusinessRuleException.class, () -> purge.purge(code, code));
     }
 
     @Test
     void purgesTheCenterWithEverythingInIt() {
         String code = seededCenter();
         UUID other = UUID.randomUUID();
-        jdbc.update("insert into center(id, code, name) values (?, 'OTRO', 'Otro centro')", other);
-        jdbc.update("insert into app_user_center(user_id, center_id) select id, ? from app_user where username = 'admin'", other);
+        // "admin" belongs only to the purged center: as SUPER_ADMIN it must be moved, not deleted.
+        // Named to sort first, so it is the center super administrators fall back to.
+        jdbc.update("insert into center(id, code, name) values (?, 'OTRO', '0 Otro centro')", other);
         new SuperAdminBootstrap(jdbc, "admin@miriv.local").run(null);
         actAs("admin");
 
         var impact = purge.impact(code);
         assertTrue(impact.canPurge());
         assertTrue(impact.usersDeleted().contains("enologo"));
+        assertFalse(impact.usersDeleted().contains("admin"));
+        assertEquals(java.util.List.of("admin"), impact.superAdminsMoved());
 
         purge.purge(code, code.toLowerCase());
 
         assertEquals(0, jdbc.queryForObject("select count(*) from center where code = ?", Integer.class, code));
         assertEquals(0, jdbc.queryForObject("select count(*) from app_user where username = 'enologo' and active", Integer.class));
-        assertEquals(other, jdbc.queryForObject("select center_id from app_user where username = 'admin'", UUID.class));
+        assertEquals(other, jdbc.queryForObject("select center_id from app_user where username = 'admin' and active", UUID.class));
+        assertEquals(1, jdbc.queryForObject("select count(*) from app_user_center uc join app_user u on u.id = uc.user_id "
+            + "where u.username = 'admin' and uc.center_id = ?", Integer.class, other));
         assertEquals(1, jdbc.queryForObject("select count(*) from audit_log where action = 'CENTER_PURGED'", Integer.class));
     }
 }

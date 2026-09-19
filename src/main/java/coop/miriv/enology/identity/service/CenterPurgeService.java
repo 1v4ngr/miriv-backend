@@ -58,7 +58,8 @@ public class CenterPurgeService {
     public CenterImpactResponse impact(String code) {
         UUID centerId = centerId(code);
         collect(centerId);
-        return new CenterImpactResponse(code, counts(), usernames(), accounts.actorIsSuperAdmin());
+        return new CenterImpactResponse(code, counts(), usernames(), superAdminsMoved(), fallbackCenterName(centerId),
+            accounts.actorIsSuperAdmin());
     }
 
     @Transactional
@@ -71,11 +72,16 @@ public class CenterPurgeService {
         }
         UUID centerId = centerId(code);
         collect(centerId);
-        Boolean deletesMe = jdbc.queryForObject("select exists(select 1 from p_user where id = ?)", Boolean.class, context.userId());
-        if (Boolean.TRUE.equals(deletesMe)) {
-            throw new BusinessRuleException("Es tu único centro: añádete antes a otro centro para no eliminar tu propia cuenta.");
+        UUID fallback = fallbackCenter(centerId);
+        if (fallback == null) {
+            throw new BusinessRuleException("Es el último centro: crea otro antes de eliminarlo.");
         }
-        CenterImpactResponse summary = new CenterImpactResponse(code, counts(), usernames(), true);
+        CenterImpactResponse summary = new CenterImpactResponse(code, counts(), usernames(), superAdminsMoved(),
+            fallbackCenterName(centerId), true);
+        // Super administrators are not tied to a center: they move to another one instead of being removed.
+        jdbc.update("insert into app_user_center (user_id, center_id) select id, ? from p_super "
+            + "on conflict do nothing", fallback);
+        jdbc.update("update app_user set center_id = ? where id in (select id from p_super) and center_id = ?", fallback, centerId);
 
         String[] statements = {
             "delete from task_execution where task_id in (select id from p_task) or sample_id in (select id from p_sample)",
@@ -121,7 +127,8 @@ public class CenterPurgeService {
         jdbc.update("delete from center where id = ?", centerId);
 
         audit.record("center", centerId, "CENTER_PURGED", "Centro " + code + " eliminado con todo su contenido", null, Map.of(
-            "code", code, "deleted", summary.counts(), "users", summary.usersDeleted(), "usersDeactivated", deactivated));
+            "code", code, "deleted", summary.counts(), "users", summary.usersDeleted(), "usersDeactivated", deactivated,
+            "superAdminsMoved", summary.superAdminsMoved()));
         return summary;
     }
 
@@ -201,14 +208,33 @@ public class CenterPurgeService {
             "create temp table p_op on commit drop as select id from operation where content_unit_id in (select id from p_cu) "
                 + "or deposit_id in (select id from p_dep)",
             // Users whose only center is this one (by membership or, lacking any, by primary center).
-            "create temp table p_user on commit drop as select u.id from app_user u "
+            "create temp table p_only on commit drop as select u.id from app_user u "
                 + "where (u.center_id = '%1$s' or exists (select 1 from app_user_center uc where uc.user_id = u.id and uc.center_id = '%1$s')) "
                 + "and not exists (select 1 from app_user_center uc where uc.user_id = u.id and uc.center_id <> '%1$s')",
+            // Super administrators among them are moved to another center, never removed.
+            "create temp table p_super on commit drop as select id from p_only where id in (select ur.user_id from app_user_role ur "
+                + "join role r on r.id = ur.role_id where r.code = 'SUPER_ADMIN')",
+            "create temp table p_user on commit drop as select id from p_only where id not in (select id from p_super)",
         };
         // Dropped first too: impact() and purge() may run inside the same outer transaction.
         jdbc.execute("drop table if exists p_zone, p_dep, p_lot, p_lab, p_cu, p_mov, p_sample, p_analysis, p_result, "
-            + "p_inc, p_plan, p_pv, p_task, p_op, p_user");
+            + "p_inc, p_plan, p_pv, p_task, p_op, p_only, p_super, p_user");
         for (String sql : temp) jdbc.execute(sql.formatted(c));
+    }
+
+    private List<String> superAdminsMoved() {
+        return jdbc.queryForList("select username from app_user where id in (select id from p_super) order by username", String.class);
+    }
+
+    /** Where super administrators go: first remaining center by name, or null if this is the last one. */
+    private UUID fallbackCenter(UUID centerId) {
+        return jdbc.query("select id from center where id <> ? order by name limit 1",
+            (rs, n) -> rs.getObject(1, UUID.class), centerId).stream().findFirst().orElse(null);
+    }
+
+    private String fallbackCenterName(UUID centerId) {
+        return jdbc.query("select name from center where id <> ? order by name limit 1",
+            (rs, n) -> rs.getString(1), centerId).stream().findFirst().orElse(null);
     }
 
     private Map<String, Integer> counts() {
