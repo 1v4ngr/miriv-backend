@@ -57,8 +57,11 @@ public class SecurityConfig {
     public AccessDeniedHandler accessDeniedHandler() {
         return (request, response, exception) -> {
             response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+            // Explicit UTF-8: without it the servlet writer defaults to ISO-8859-1 and "acción" arrives broken.
+            response.setCharacterEncoding(java.nio.charset.StandardCharsets.UTF_8.name());
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-            response.getWriter().write("{\"status\":403,\"message\":\"No tienes permiso para realizar esta acción.\"}");
+            response.getWriter().write("{\"status\":403,\"code\":\"FORBIDDEN\",\"message\":\"No tienes permiso para realizar esta acción.\",\"path\":\""
+                + request.getRequestURI().replace("\"", "") + "\"}");
         };
     }
 
