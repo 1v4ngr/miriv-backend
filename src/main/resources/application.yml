@@ -28,6 +28,14 @@ server:
   error:
     include-message: always
 
+spring.ai.mcp.server:
+  name: miriv
+  version: 1.0.0
+  protocol: STATELESS
+  type: SYNC
+  streamable-http:
+    mcp-endpoint: /mcp
+
 app:
   security:
     jwt:

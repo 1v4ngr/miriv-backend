@@ -85,6 +85,7 @@ public class SecurityConfig {
                 }
                 authorize.requestMatchers(HttpMethod.GET, "/api/**").authenticated();
                 authorize.requestMatchers("/api/account/**", "/api/notifications/**").authenticated();
+                authorize.requestMatchers("/mcp", "/mcp/**").authenticated();
                 authorize.anyRequest().denyAll();
             })
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
