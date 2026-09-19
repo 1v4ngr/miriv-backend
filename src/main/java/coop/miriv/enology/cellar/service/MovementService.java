@@ -97,21 +97,45 @@ public class MovementService {
                                                       String status, String authorUsername, String q,
                                                       int page, int size) {
         UUID centerId = context.centerId();
-        CurrentUserContext.ZoneFilter zoneFilter = context.readZoneFilter("src");
+        CurrentUserContext.ZoneFilter zoneFilter = context.readZoneFilter("d");
         int safeSize = Math.min(Math.max(size, 1), 200);
         int safePage = Math.max(page, 0);
         int offset = safePage * safeSize;
 
-        StringBuilder where = new StringBuilder("where m.center_id = ? ");
+        // Movements are linked to a center through the deposits they touch. The list filter
+        // restricts to movements whose lines belong to deposits of the user's center, OR
+        // (for PLANNED movements without lines yet) the planned_source/destination deposits
+        // are in the user's center. Zone filter narrows further to deposits in the user's
+        // allowed zones.
+        StringBuilder where = new StringBuilder("where ( "
+            + "exists (select 1 from movement_line ml2 "
+            + "join deposit d on d.id in (ml2.source_deposit_id, ml2.destination_deposit_id) "
+            + "where ml2.movement_id = m.id and d.center_id = ?) "
+            + "or exists (select 1 from deposit d where d.center_id = ? and d.code = m.planned_source_deposit) "
+            + "or exists (select 1 from deposit d where d.center_id = ? and d.code = m.planned_destination_deposit) "
+            + ") ");
         List<Object> args = new ArrayList<>();
-        args.add(centerId);
-        if (!zoneFilter.allZones()) where.append(zoneFilter.sql());
+        args.add(centerId); args.add(centerId); args.add(centerId);
+        if (!zoneFilter.allZones()) {
+            where.append("and ( "
+                + "exists (select 1 from movement_line ml2 "
+                + "join deposit d on d.id in (ml2.source_deposit_id, ml2.destination_deposit_id) "
+                + "where ml2.movement_id = m.id and d.zone_id in (").append(zoneFilter.zoneIds().size()).append(" ids)) "
+                + "or exists (select 1 from deposit d where d.zone_id in (").append(zoneFilter.zoneIds().size()).append(" ids) and d.code = m.planned_source_deposit) "
+                + "or exists (select 1 from deposit d where d.zone_id in (").append(zoneFilter.zoneIds().size()).append(" ids) and d.code = m.planned_destination_deposit) "
+                + ") ");
+            for (UUID zoneId : zoneFilter.zoneIds()) args.add(zoneId);
+            for (UUID zoneId : zoneFilter.zoneIds()) args.add(zoneId);
+            for (UUID zoneId : zoneFilter.zoneIds()) args.add(zoneId);
+        }
         if (from != null) { where.append(" and m.effective_at >= ?"); args.add(Timestamp.from(from.atStartOfDay(timezone).toInstant())); }
         if (to != null) { where.append(" and m.effective_at < ?"); args.add(Timestamp.from(to.plusDays(1).atStartOfDay(timezone).toInstant())); }
         if (depositCode != null && !depositCode.isBlank()) {
-            where.append(" and (exists (select 1 from movement_line ml2 join deposit d on d.id = ml2.source_deposit_id where ml2.movement_id = m.id and lower(d.code) = lower(?)) "
-                + " or exists (select 1 from movement_line ml2 join deposit d on d.id = ml2.destination_deposit_id where ml2.movement_id = m.id and lower(d.code) = lower(?)))");
-            args.add(depositCode.trim()); args.add(depositCode.trim());
+            where.append(" and ((exists (select 1 from movement_line ml2 join deposit d on d.id = ml2.source_deposit_id where ml2.movement_id = m.id and lower(d.code) = lower(?)) "
+                + " or exists (select 1 from movement_line ml2 join deposit d on d.id = ml2.destination_deposit_id where ml2.movement_id = m.id and lower(d.code) = lower(?))) "
+                + "or lower(m.planned_source_deposit) = lower(?) "
+                + "or lower(m.planned_destination_deposit) = lower(?))");
+            args.add(depositCode.trim()); args.add(depositCode.trim()); args.add(depositCode.trim()); args.add(depositCode.trim());
         }
         if (lotCode != null && !lotCode.isBlank()) {
             where.append(" and exists (select 1 from movement_line ml2 join content_unit cu on cu.id = ml2.source_content_unit_id join lot l on l.id = cu.lot_id "
@@ -522,7 +546,14 @@ public class MovementService {
               from movement m
               left join app_user ru on ru.id = m.responsible_id
               left join app_user rg on rg.id = m.registered_by_id
-             where m.center_id = ? and upper(m.code) = upper(?)
+             where upper(m.code) = upper(?)
+               and (
+                 exists (select 1 from movement_line ml2
+                          join deposit d on d.id in (ml2.source_deposit_id, ml2.destination_deposit_id)
+                         where ml2.movement_id = m.id and d.center_id = ?)
+                 or exists (select 1 from deposit d where d.center_id = ? and d.code = m.planned_source_deposit)
+                 or exists (select 1 from deposit d where d.center_id = ? and d.code = m.planned_destination_deposit)
+               )
             """,
             (rs, index) -> new MovementRow(
                 rs.getObject("id", UUID.class), rs.getString("code"), rs.getString("type"), rs.getString("status"),
@@ -534,7 +565,7 @@ public class MovementService {
                 rs.getString("planned_source_deposit"), rs.getString("planned_destination_deposit"),
                 rs.getBigDecimal("planned_volume_liters"), rs.getBigDecimal("planned_loss_liters"),
                 rs.getBoolean("planned_authorize_mixture")),
-            centerId, code == null ? "" : code.trim());
+            code == null ? "" : code.trim(), centerId, centerId, centerId);
         if (rows.isEmpty()) throw new NotFoundException("Movimiento no encontrado: " + code);
         return rows.getFirst();
     }
