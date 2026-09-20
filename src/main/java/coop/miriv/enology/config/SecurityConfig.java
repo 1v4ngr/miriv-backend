@@ -2,6 +2,7 @@ package coop.miriv.enology.config;
 
 import coop.miriv.enology.security.JwtAuthenticationFilter;
 import coop.miriv.enology.security.JwtProperties;
+import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Arrays;
 import java.util.List;
@@ -77,6 +78,10 @@ public class SecurityConfig {
                 .authenticationEntryPoint(authenticationEntryPoint)
                 .accessDeniedHandler(accessDeniedHandler))
             .authorizeHttpRequests(authorize -> {
+                // Spring forwards 404s and 500s to /error, which anyRequest().denyAll() would turn into a
+                // 401 — and the SPA logs the user out on any 401. Let the error dispatch through so a
+                // missing endpoint stays a 404 for the caller.
+                authorize.dispatcherTypeMatchers(DispatcherType.ERROR).permitAll();
                 authorize.requestMatchers("/api/auth/**", "/docs/**", "/swagger-ui/**", "/v3/api-docs/**", "/actuator/health").permitAll();
                 for (PermissionRules.Rule rule : PermissionRules.RULES) {
                     String[] authorities = Arrays.stream(rule.permissions()).map(code -> "PERM_" + code).toArray(String[]::new);

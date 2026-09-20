@@ -1,5 +1,6 @@
 package coop.miriv.enology.laboratory.service;
 
+import coop.miriv.enology.audit.AuditService;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
@@ -43,12 +44,14 @@ public class LaboratoryService {
 
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
+    private final AuditService audit;
     private final ZoneId timezone;
 
-    public LaboratoryService(JdbcTemplate jdbc, CurrentUserContext context,
+    public LaboratoryService(JdbcTemplate jdbc, CurrentUserContext context, AuditService audit,
                              @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
         this.context = context;
+        this.audit = audit;
         this.timezone = ZoneId.of(timezone);
     }
 
@@ -213,6 +216,53 @@ public class LaboratoryService {
             + "validated_at = null, validated_by_id = null where id = ?", reason.trim(), sample.analysisId());
         jdbc.update("update result set validated = false, validated_at = null, validated_by_id = null "
             + "where analysis_id = ? and is_current = true", sample.analysisId());
+        return get(code);
+    }
+
+    /**
+     * Moves a sample to the deposit it was really taken from, when it was registered against the wrong tank.
+     * The content and occupation are resolved by the sampling time, exactly as in {@link #create}, so the
+     * results follow the wine that actually occupied that deposit then; curves, alerts and history move with it.
+     * Requires SAMPLE_REASSIGN in the zones of both the current and the new deposit, and keeps the reason in the audit log.
+     */
+    @Transactional
+    public SampleResponse reassignDeposit(String code, String depositCode, String reason) {
+        UUID centerId = context.centerId();
+        SampleRow sample = findForUpdate(code);
+        String target = normalize(depositCode);
+
+        UUID currentZoneId = jdbc.queryForObject("select d.zone_id from sample s "
+            + "join deposit d on d.id = s.deposit_id_at_sampling where s.code = ?", UUID.class, sample.code());
+        context.requireInZone("SAMPLE_REASSIGN", currentZoneId);
+
+        List<Deposit> targets = jdbc.query("select id, zone_id from deposit where center_id = ? and upper(code) = ? and active",
+            (rs, index) -> new Deposit(rs.getObject("id", UUID.class), rs.getObject("zone_id", UUID.class)), centerId, target);
+        if (targets.isEmpty()) throw new NotFoundException("Depósito no encontrado.");
+        Deposit deposit = targets.getFirst();
+        context.requireInZone("SAMPLE_REASSIGN", deposit.zoneId());
+
+        if (target.equalsIgnoreCase(normalize(sample.originDeposit()))) {
+            throw new BusinessRuleException("La muestra ya está asignada a ese depósito.");
+        }
+
+        List<OccupationAtTime> occupations = jdbc.query(
+            "select o.id, o.content_unit_id, cu.code as content_code, l.code as lot_code "
+                + "from occupation o join content_unit cu on cu.id = o.content_unit_id join lot l on l.id = cu.lot_id "
+                + "where o.deposit_id = ? and o.start_at <= ? and (o.end_at is null or o.end_at > ?) "
+                + "order by o.start_at desc limit 1",
+            (rs, index) -> new OccupationAtTime(rs.getObject("id", UUID.class),
+                rs.getObject("content_unit_id", UUID.class), rs.getString("content_code"), rs.getString("lot_code")),
+            deposit.id(), Timestamp.from(sample.takenAt()), Timestamp.from(sample.takenAt()));
+        if (occupations.isEmpty()) {
+            throw new BusinessRuleException("Ningún contenido ocupaba ese depósito en el momento del muestreo.");
+        }
+        OccupationAtTime occupation = occupations.getFirst();
+
+        jdbc.update("update sample set content_unit_id = ?, occupation_id = ?, deposit_id_at_sampling = ? where code = ?",
+            occupation.contentId(), occupation.occupationId(), deposit.id(), sample.code());
+        audit.record("sample", sample.analysisId(), "SAMPLE_REASSIGNED", reason.trim(),
+            Map.of("deposit", sample.originDeposit(), "content", sample.contentCode()),
+            Map.of("deposit", target, "content", occupation.contentCode()));
         return get(code);
     }
 
@@ -439,6 +489,7 @@ public class LaboratoryService {
         + "left join internal_category c on c.id = cu.category_id "
         + "join analysis_panel p on p.id = a.panel_id join app_user u on u.id = s.taken_by_id";
 
+    private record Deposit(UUID id, UUID zoneId) {}
     private record OccupationAtTime(UUID occupationId, UUID contentId, String contentCode, String lotCode) {}
     private record Parameter(UUID id, String code) {}
     private record Qualifier(String code) {}

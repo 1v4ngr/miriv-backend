@@ -126,7 +126,7 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
             List.of(new ResultInput("pH", "3,42", "", null, null)), "Borrador",
             LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals(1, updated.completed());
-        assertEquals(10, updated.panelParameters().size()); // 8 + MALIC_ACID and TOTAL_ACIDITY_TH2 (V27)
+        assertEquals(11, updated.panelParameters().size()); // 8 + MALIC_ACID/TOTAL_ACIDITY_TH2 (V27) + optional CONTENT_TEMPERATURE (V45)
         assertThrows(BusinessRuleException.class, () -> laboratory.validate(sampleCode, "Reviewed"));
         var complete = laboratory.saveResults(sampleCode, new ResultsRequest(List.of(
             new ResultInput("pH", "3,42", "", null, null),

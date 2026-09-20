@@ -3,6 +3,7 @@ package coop.miriv.enology.laboratory.web;
 import coop.miriv.enology.laboratory.dto.CorrectionRequest;
 import coop.miriv.enology.laboratory.dto.NewSampleRequest;
 import coop.miriv.enology.laboratory.dto.NoteRequest;
+import coop.miriv.enology.laboratory.dto.ReassignDepositRequest;
 import coop.miriv.enology.laboratory.dto.ReasonRequest;
 import coop.miriv.enology.laboratory.dto.ResultsRequest;
 import coop.miriv.enology.laboratory.dto.SampleResponse;
@@ -51,6 +52,12 @@ public class LaboratoryController {
     public SampleResponse correct(@PathVariable String code, @PathVariable String parameter,
                                   @Valid @RequestBody CorrectionRequest request) {
         return service.correct(code, parameter, request);
+    }
+
+    /** Fix a sample registered against the wrong tank: moves it to the content that occupied `deposit` when it was taken. */
+    @PostMapping("/{code}/deposit")
+    public SampleResponse reassignDeposit(@PathVariable String code, @Valid @RequestBody ReassignDepositRequest request) {
+        return service.reassignDeposit(code, request.deposit(), request.reason());
     }
 
     @PostMapping("/{code}/invalidate")

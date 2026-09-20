@@ -60,6 +60,7 @@ public final class PermissionRules {
         rule(POST, "/api/laboratory/samples/*/invalidate", "ANALYSIS_INVALIDATE"),
         rule(PUT, "/api/laboratory/samples/*/results", "RESULT_ENTER"),
         rule(PUT, "/api/laboratory/results/**", "RESULT_ENTER"),
+        rule(POST, "/api/laboratory/samples/*/deposit", "SAMPLE_REASSIGN"),
         rule(POST, "/api/laboratory/samples", "SAMPLE_REGISTER"),
         rule(null, "/api/laboratory/imports/**", "RESULT_IMPORT"),
         // Elaboration
