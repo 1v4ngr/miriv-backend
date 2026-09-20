@@ -52,12 +52,17 @@ public final class PermissionRules {
         rule(PATCH, "/api/lots/**", "LOT_MANAGE"),
         rule(POST, "/api/movements/deposits/*/content-clearance", "CONTENT_CORRECT"),
         rule(POST, "/api/movements/*/cancel", "MOVEMENT_PLAN"),
+        rule(PATCH, "/api/movements/*", "MOVEMENT_REGISTER"),
+        // Undo also demands SUPER_ADMIN in the service.
+        rule(DELETE, "/api/movements/*", "MOVEMENT_REGISTER"),
         rule(POST, "/api/movements/**", "MOVEMENT_REGISTER", "MOVEMENT_PLAN"),
         rule(POST, "/api/contents/*/state-reviews", "STATE_CONFIRM"),
         // Laboratory
         rule(POST, "/api/laboratory/samples/*/validate", "ANALYSIS_VALIDATE"),
         rule(POST, "/api/laboratory/samples/*/results/*/correction", "RESULT_CORRECT"),
         rule(POST, "/api/laboratory/samples/*/invalidate", "ANALYSIS_INVALIDATE"),
+        // The service also demands SUPER_ADMIN; the rule keeps it out of everyone else's reach.
+        rule(DELETE, "/api/laboratory/samples/*", "ANALYSIS_INVALIDATE"),
         rule(PUT, "/api/laboratory/samples/*/results", "RESULT_ENTER"),
         rule(PUT, "/api/laboratory/results/**", "RESULT_ENTER"),
         rule(POST, "/api/laboratory/samples/*/deposit", "SAMPLE_REASSIGN"),

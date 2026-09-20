@@ -11,6 +11,7 @@ import coop.miriv.enology.cellar.dto.LotRequest;
 import coop.miriv.enology.cellar.service.DepositService;
 import coop.miriv.enology.cellar.service.LotService;
 import coop.miriv.enology.common.exception.BusinessRuleException;
+import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.service.AppUserDetailsService;
 import coop.miriv.enology.identity.service.AppUserPrincipal;
 import coop.miriv.enology.laboratory.dto.NewSampleRequest;
@@ -126,6 +127,48 @@ class SampleReassignTest extends IntegrationTest {
 
         assertThrows(AccessDeniedException.class,
             () -> laboratory.reassignDeposit(sampleCode, rightDeposit, "Sin permiso"));
+    }
+
+    @Test
+    void aValidatedAnalysisCanBeInvalidatedWithAReason() {
+        laboratory.saveResults(sampleCode, new ResultsRequest(
+            List.of(new ResultInput("pH", "3,40", "", null, null),
+                new ResultInput("Densidad", "1,05", "g/mL", null, null),
+                new ResultInput("Acidez volátil", "0,44", "g/L", null, null),
+                new ResultInput("Azúcares reductores", "136,6", "g/L", null, null),
+                new ResultInput("Ácido málico", "1,61", "g/L", null, null),
+                new ResultInput("Acidez total TH2", "5,79", "g/L como tartárico", null, null),
+                new ResultInput("Etanol", "5,27", "% vol.", null, null),
+                new ResultInput("Glucosa más fructosa", "129", "g/L", null, null),
+                new ResultInput("Acidez total", "3,78", "g/L como tartárico", null, null),
+                new ResultInput("CO2 disuelto", "8023", "mg/L", null, null)),
+            "Pendiente validar", LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
+        assertEquals("Validado", laboratory.validate(sampleCode, "Revisado").status());
+
+        var invalidated = laboratory.invalidate(sampleCode, "La sonda estaba descalibrada");
+
+        assertEquals("Invalidado", invalidated.status());
+        assertEquals("La sonda estaba descalibrada", invalidated.validationNote());
+        assertTrue(jdbc.queryForObject("select exists(select 1 from audit_log where action = 'ANALYSIS_INVALIDATED')",
+            Boolean.class), "the reason is kept in the audit log");
+    }
+
+    @Test
+    void onlyASuperAdministratorDeletesAnAnalysisForGood() {
+        assertThrows(AccessDeniedException.class, () -> laboratory.deleteSample(sampleCode, "Sin permiso"));
+
+        jdbc.update("insert into app_user_role (user_id, role_id) "
+            + "select u.id, r.id from app_user u, role r where u.username = 'enologo' and r.code = 'SUPER_ADMIN' "
+            + "on conflict do nothing");
+
+        laboratory.deleteSample(sampleCode, "Fila duplicada de una importación");
+
+        assertEquals(0, jdbc.queryForObject("select count(*) from sample where code = ?", Integer.class, sampleCode).intValue());
+        assertEquals(0, jdbc.queryForObject("select count(*) from analysis a join sample s on s.id = a.sample_id "
+            + "where s.code = ?", Integer.class, sampleCode).intValue());
+        assertTrue(jdbc.queryForObject("select exists(select 1 from audit_log where action = 'SAMPLE_DELETED')",
+            Boolean.class), "what was deleted stays in the audit log");
+        assertThrows(NotFoundException.class, () -> laboratory.get(sampleCode));
     }
 
     private LotRequest lot(String code) {

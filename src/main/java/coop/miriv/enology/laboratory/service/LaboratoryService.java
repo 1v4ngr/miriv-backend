@@ -5,6 +5,7 @@ import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.ConflictException;
 import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.service.CurrentUserContext;
+import coop.miriv.enology.identity.service.SuperAdminCheck;
 import coop.miriv.enology.laboratory.dto.CorrectionRequest;
 import coop.miriv.enology.laboratory.dto.NewSampleRequest;
 import coop.miriv.enology.laboratory.dto.PanelParameterResponse;
@@ -45,13 +46,15 @@ public class LaboratoryService {
     private final JdbcTemplate jdbc;
     private final CurrentUserContext context;
     private final AuditService audit;
+    private final SuperAdminCheck superAdmin;
     private final ZoneId timezone;
 
     public LaboratoryService(JdbcTemplate jdbc, CurrentUserContext context, AuditService audit,
-                             @Value("${app.timezone}") String timezone) {
+                             SuperAdminCheck superAdmin, @Value("${app.timezone}") String timezone) {
         this.jdbc = jdbc;
         this.context = context;
         this.audit = audit;
+        this.superAdmin = superAdmin;
         this.timezone = ZoneId.of(timezone);
     }
 
@@ -207,16 +210,52 @@ public class LaboratoryService {
         return get(code);
     }
 
+    /**
+     * Retires an analysis keeping its evidence. A validated one can be invalidated too: a reading taken
+     * from the wrong tank or with a broken probe has to be retired as a whole, not corrected value by value.
+     */
     @Transactional
     public SampleResponse invalidate(String code, String reason) {
         SampleRow sample = findForUpdate(code);
         if (sample.status().equals("INVALIDATED")) throw new BusinessRuleException("Análisis ya invalidado.");
-        if (sample.status().equals("VALIDATED")) throw new BusinessRuleException("Un análisis validado debe corregirse primero, no invalidarse.");
+        boolean wasValidated = sample.status().equals("VALIDATED");
         jdbc.update("update analysis set status = 'INVALIDATED'::analysis_status, validation_note = ?, "
             + "validated_at = null, validated_by_id = null where id = ?", reason.trim(), sample.analysisId());
         jdbc.update("update result set validated = false, validated_at = null, validated_by_id = null "
             + "where analysis_id = ? and is_current = true", sample.analysisId());
+        audit.record("analysis", sample.analysisId(), "ANALYSIS_INVALIDATED",
+            (wasValidated ? "Análisis validado invalidado: " : "Análisis invalidado: ") + reason.trim());
         return get(code);
+    }
+
+    /**
+     * Removes a sample and everything hanging from it for good: only a super administrator, only with a
+     * reason, and only after the audit entry keeping what was deleted. Invalidating is the reversible
+     * option; this one is for samples that should never have existed (a duplicated import, a test row).
+     */
+    @Transactional
+    public void deleteSample(String code, String reason) {
+        superAdmin.require("eliminar definitivamente un análisis");
+        SampleRow sample = findForUpdate(code);
+        UUID sampleId = jdbc.queryForObject("select id from sample where code = ?", UUID.class, sample.code());
+
+        audit.record("sample", sampleId, "SAMPLE_DELETED", reason.trim(),
+            Map.of("code", sample.code(), "deposit", sample.originDeposit(), "content", sample.contentCode(),
+                "takenAt", sample.takenAt().toString(), "status", sample.status(),
+                "results", jdbc.queryForObject("select count(*) from result where analysis_id = ?",
+                    Integer.class, sample.analysisId())),
+            null);
+
+        // Evidence and executions point at the sample/results: they keep their note, they lose the link.
+        jdbc.update("update incident_evidence set result_id = null where result_id in "
+            + "(select id from result where analysis_id = ?)", sample.analysisId());
+        jdbc.update("update incident_evidence set sample_id = null where sample_id = ?", sampleId);
+        jdbc.update("update task_execution set sample_id = null where sample_id = ?", sampleId);
+        // Corrections chain results to each other; unlink before deleting so no row keeps a dangling parent.
+        jdbc.update("update result set supersedes_result_id = null where analysis_id = ?", sample.analysisId());
+        jdbc.update("delete from result where analysis_id = ?", sample.analysisId());
+        jdbc.update("delete from analysis where sample_id = ?", sampleId);
+        jdbc.update("delete from sample where id = ?", sampleId);
     }
 
     /**
