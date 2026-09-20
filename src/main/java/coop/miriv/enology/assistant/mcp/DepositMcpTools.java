@@ -4,6 +4,7 @@ import coop.miriv.enology.cellar.dto.DepositResponse;
 import coop.miriv.enology.cellar.dto.MovementSummaryResponse;
 import coop.miriv.enology.cellar.service.ContentService;
 import coop.miriv.enology.cellar.service.DepositService;
+import coop.miriv.enology.assistant.mcp.DepositStatusDto.DepositStatus;
 import coop.miriv.enology.cellar.service.MovementService;
 import coop.miriv.enology.common.dto.PageResponse;
 import coop.miriv.enology.incident.dto.IncidentResponse;
@@ -37,10 +38,11 @@ public class DepositMcpTools {
     private final IncidentService incidents;
     private final TaskService tasks;
     private final MovementService movements;
+    private final DepositStatusService status;
 
     public DepositMcpTools(DepositService deposits, ContentService contents, TrackingService tracking,
                            AlertService alerts, IncidentService incidents, TaskService tasks,
-                           MovementService movements) {
+                           MovementService movements, DepositStatusService status) {
         this.deposits = deposits;
         this.contents = contents;
         this.tracking = tracking;
@@ -48,9 +50,23 @@ public class DepositMcpTools {
         this.incidents = incidents;
         this.tasks = tasks;
         this.movements = movements;
+        this.status = status;
     }
 
-    @Tool(name = "list_deposits", description = "Lists the deposits (tanks) of the user's cellar with status, capacity and active contents. Optional filters by zone and status.")
+    @Tool(name = "get_deposit_status", description = "How a deposit is doing, in one call: what it holds, "
+        + "every measured parameter with its trend over the last N days (default 30) — latest value, change, "
+        + "change per day, target range and status OK/WARNING/CRITICAL, plus the individual readings — and its "
+        + "active alerts, open incidents, pending tasks and recent winemaking events. Use this FIRST for any "
+        + "question about how a deposit is, how it evolves or what to do with it.")
+    public DepositStatus getDepositStatus(
+            @ToolParam(description = "Deposit code, e.g. D-01") String code,
+            @ToolParam(required = false, description = "Days of history to include (default 30, max 365)") Integer days) {
+        return status.status(code, days);
+    }
+
+    @Tool(name = "list_deposits", description = "Lists the deposits (tanks) of the user's cellar with status, "
+        + "capacity and active contents. Optional filters by zone and status. For one deposit's detail and "
+        + "trends use get_deposit_status.")
     public List<DepositResponse> listDeposits(
             @ToolParam(required = false, description = "Zone code to filter by") String zone,
             @ToolParam(required = false, description = "Status: AVAILABLE, OCCUPIED, PENDING_CLEANING, CLEANING, MAINTENANCE") String status) {
@@ -61,7 +77,7 @@ public class DepositMcpTools {
             .toList();
     }
 
-    @Tool(name = "get_deposit", description = "Full detail of one deposit by code: occupations, lots and cleaning history.")
+    @Tool(name = "get_deposit", description = "Raw detail of one deposit: occupation history, lots and cleaning records. For how the deposit is doing use get_deposit_status instead.")
     public DepositResponse getDeposit(@ToolParam(description = "Deposit code, e.g. D-01") String code) {
         return deposits.get(code);
     }
@@ -71,7 +87,7 @@ public class DepositMcpTools {
         return contents.get(contentCode);
     }
 
-    @Tool(name = "get_deposit_latest_analysis", description = "Latest laboratory values of the wine currently in a deposit.")
+    @Tool(name = "get_deposit_latest_analysis", description = "Only the latest laboratory values of the wine in a deposit, without history. Prefer get_deposit_status, which already includes them with their trend.")
     public Object getDepositLatestAnalysis(@ToolParam(description = "Deposit code") String code) {
         List<String> active = activeContentCodes(code);
         return active.isEmpty() ? List.of() : tracking.latest(active);
