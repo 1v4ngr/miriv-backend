@@ -36,7 +36,7 @@ public final class TrackingDto {
 
     public record OverviewRow(String content, String deposit, String depositName, String zone, String lot,
                               String category, BigDecimal volumeLiters, String alcoholicState, String malolacticState,
-                              int openSamples, Long daysSinceLastSample, int openTasks, Instant nextTaskDueAt,
+                              int openSamples, Long daysSinceLastSample,
                               String worstStatus, List<OverviewCell> cells) {}
 
     public record OverviewResponse(List<ParameterInfo> parameters, List<OverviewRow> rows) {}

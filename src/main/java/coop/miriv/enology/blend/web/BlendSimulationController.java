@@ -3,7 +3,6 @@ package coop.miriv.enology.blend.web;
 import coop.miriv.enology.blend.dto.BlendDto.BlendRequest;
 import coop.miriv.enology.blend.dto.BlendDto.BlendSummary;
 import coop.miriv.enology.blend.dto.BlendDto.BlendView;
-import coop.miriv.enology.blend.dto.BlendDto.ConvertRequest;
 import coop.miriv.enology.blend.service.BlendSimulationService;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -44,9 +43,6 @@ public class BlendSimulationController {
     @PostMapping("/{id}/duplicate")
     @ResponseStatus(HttpStatus.CREATED)
     public BlendView duplicate(@PathVariable UUID id) { return service.duplicate(id); }
-
-    @PostMapping("/{id}/convert")
-    public BlendView convert(@PathVariable UUID id, @Valid @RequestBody ConvertRequest request) { return service.convert(id, request); }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)

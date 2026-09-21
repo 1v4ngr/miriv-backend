@@ -83,22 +83,6 @@ public final class PermissionRules {
         rule(PUT, "/api/rules/**", "RULE_EDIT"),
         rule(POST, "/api/recommendations/**", "RULE_EDIT"),
         rule(PUT, "/api/recommendations/**", "RULE_EDIT"),
-        // Operations
-        rule(POST, "/api/operations/*/execute", "OPERATION_EXECUTE"),
-        rule(POST, "/api/operations/**", "OPERATION_PLAN"),
-        // Incidents
-        rule(POST, "/api/incidents/*/acknowledge", "INCIDENT_ACKNOWLEDGE"),
-        rule(POST, "/api/incidents/*/assign", "INCIDENT_ASSIGN"),
-        rule(POST, "/api/incidents/*/silence", "INCIDENT_SILENCE"),
-        rule(POST, "/api/incidents/*/unsilence", "INCIDENT_SILENCE"),
-        rule(POST, "/api/incidents/*/tasks", "TASK_CREATE"),
-        rule(POST, "/api/incidents/**", "INCIDENT_CLOSE"),
-        // Tasks
-        rule(POST, "/api/tasks/*/start", "TASK_EXECUTE_OWN", "TASK_EXECUTE_ANY"),
-        rule(POST, "/api/tasks/*/complete", "TASK_EXECUTE_OWN", "TASK_EXECUTE_ANY"),
-        rule(POST, "/api/tasks/*/cancel", "TASK_CANCEL"),
-        rule(PATCH, "/api/tasks/*", "TASK_ASSIGN"),
-        rule(POST, "/api/tasks", "TASK_CREATE"),
         // Reports
         rule(GET, "/api/reports/*/file", "REPORT_EXPORT"),
         rule(POST, "/api/reports/**", "REPORT_EXPORT")

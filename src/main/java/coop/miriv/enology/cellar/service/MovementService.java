@@ -388,8 +388,8 @@ public class MovementService {
             } else {
                 resultContentId = UUID.randomUUID();
                 resultContentCode = codes.next("C", request.effectiveDate().getYear());
-                jdbc.update("insert into content_unit(id, code, lot_id, category_id, color_id, volume_liters) "
-                        + "select ?, ?, lot_id, category_id, color_id, ? from content_unit where id = ?",
+                jdbc.update("insert into content_unit(id, code, lot_id, category_id, volume_liters) "
+                        + "select ?, ?, lot_id, category_id, ? from content_unit where id = ?",
                     resultContentId, resultContentCode, request.volumeLiters(), sourceUnit.contentId());
                 lineage(resultContentId, sourceUnit.contentId(), movementId, request.volumeLiters());
             }

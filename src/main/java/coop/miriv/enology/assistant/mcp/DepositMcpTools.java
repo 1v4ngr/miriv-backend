@@ -7,17 +7,12 @@ import coop.miriv.enology.cellar.service.DepositService;
 import coop.miriv.enology.assistant.mcp.DepositStatusDto.DepositStatus;
 import coop.miriv.enology.cellar.service.MovementService;
 import coop.miriv.enology.common.dto.PageResponse;
-import coop.miriv.enology.incident.dto.IncidentResponse;
-import coop.miriv.enology.incident.service.IncidentService;
-import coop.miriv.enology.task.dto.TaskResponse;
-import coop.miriv.enology.task.service.TaskService;
 import coop.miriv.enology.tracking.dto.TrackingDto;
 import coop.miriv.enology.tracking.service.AlertService;
 import coop.miriv.enology.tracking.service.TrackingService;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Objects;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Component;
@@ -35,20 +30,15 @@ public class DepositMcpTools {
     private final ContentService contents;
     private final TrackingService tracking;
     private final AlertService alerts;
-    private final IncidentService incidents;
-    private final TaskService tasks;
     private final MovementService movements;
     private final DepositStatusService status;
 
     public DepositMcpTools(DepositService deposits, ContentService contents, TrackingService tracking,
-                           AlertService alerts, IncidentService incidents, TaskService tasks,
-                           MovementService movements, DepositStatusService status) {
+                           AlertService alerts, MovementService movements, DepositStatusService status) {
         this.deposits = deposits;
         this.contents = contents;
         this.tracking = tracking;
         this.alerts = alerts;
-        this.incidents = incidents;
-        this.tasks = tasks;
         this.movements = movements;
         this.status = status;
     }
@@ -56,7 +46,7 @@ public class DepositMcpTools {
     @Tool(name = "get_deposit_status", description = "How a deposit is doing, in one call: what it holds, "
         + "every measured parameter with its trend over the last N days (default 30) — latest value, change, "
         + "change per day, target range and status OK/WARNING/CRITICAL, plus the individual readings — and its "
-        + "active alerts, open incidents, pending tasks and recent winemaking events. Use this FIRST for any "
+        + "active alerts and recent winemaking events. Use this FIRST for any "
         + "question about how a deposit is, how it evolves or what to do with it.")
     public DepositStatus getDepositStatus(
             @ToolParam(description = "Deposit code, e.g. D-01") String code,
@@ -134,29 +124,6 @@ public class DepositMcpTools {
     @Tool(name = "get_cellar_overview", description = "Cellar-wide overview of all active contents with their latest values.")
     public Object getCellarOverview() {
         return tracking.overview(null);
-    }
-
-    @Tool(name = "list_incidents", description = "Incidents of the cellar; filter by deposit and/or only open ones.")
-    public List<IncidentResponse> listIncidents(
-            @ToolParam(required = false, description = "Deposit code") String deposit,
-            @ToolParam(required = false, description = "Only open incidents") Boolean onlyOpen) {
-        return incidents.list().stream()
-            .filter(i -> blank(deposit) || deposit.equalsIgnoreCase(i.depositCode()))
-            .filter(i -> !Boolean.TRUE.equals(onlyOpen) || !"CLOSED".equalsIgnoreCase(i.status()))
-            .limit(MAX_LIST)
-            .toList();
-    }
-
-    @Tool(name = "list_tasks", description = "Tasks of the cellar; filter by deposit and/or only pending ones.")
-    public List<TaskResponse> listTasks(
-            @ToolParam(required = false, description = "Deposit code") String deposit,
-            @ToolParam(required = false, description = "Only pending/in-progress tasks") Boolean onlyPending) {
-        return tasks.list().stream()
-            .filter(t -> blank(deposit) || deposit.equalsIgnoreCase(t.depositCode()))
-            .filter(t -> !Boolean.TRUE.equals(onlyPending)
-                || !(Objects.toString(t.status(), "").matches("(?i)COMPLETED|DONE|CANCELLED|CANCELED")))
-            .limit(MAX_LIST)
-            .toList();
     }
 
     @Tool(name = "list_movements", description = "Recent movements (transfers, racking) involving a deposit.")

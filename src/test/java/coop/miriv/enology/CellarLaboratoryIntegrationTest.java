@@ -17,8 +17,6 @@ import coop.miriv.enology.dashboard.service.WorkHomeService;
 import coop.miriv.enology.identity.repository.AppUserRepository;
 import coop.miriv.enology.identity.service.AppUserDetailsService;
 import coop.miriv.enology.identity.service.AppUserPrincipal;
-import coop.miriv.enology.incident.dto.ResolveIncidentRequest;
-import coop.miriv.enology.incident.service.IncidentService;
 import coop.miriv.enology.laboratory.dto.NewSampleRequest;
 import coop.miriv.enology.laboratory.dto.CorrectionRequest;
 import coop.miriv.enology.laboratory.dto.ResultInput;
@@ -27,9 +25,6 @@ import coop.miriv.enology.laboratory.service.LaboratoryService;
 import coop.miriv.enology.plan.dto.CreatePlanRequest;
 import coop.miriv.enology.plan.dto.PlanVersionRequest;
 import coop.miriv.enology.plan.service.PlanService;
-import coop.miriv.enology.task.dto.CompleteTaskRequest;
-import coop.miriv.enology.task.dto.CreateTaskRequest;
-import coop.miriv.enology.task.service.TaskService;
 import coop.miriv.enology.support.IntegrationTest;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -66,8 +61,6 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
     @Autowired LaboratoryService laboratory;
     @Autowired WorkHomeService workHome;
     @Autowired PlanService plans;
-    @Autowired TaskService tasks;
-    @Autowired IncidentService incidents;
     @Autowired JdbcTemplate jdbc;
 
     @BeforeEach
@@ -143,22 +136,6 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
             "Pendiente validar", LocalDate.now(TIMEZONE), "Internal laboratory", "Meter", "Electrode", null));
         assertEquals("Pendiente validar", complete.status());
         assertEquals("Validado", laboratory.validate(sampleCode, "Reviewed").status());
-        var task = tasks.create(new CreateTaskRequest("Check laboratory trend", target,
-            movement.destinationContentCode(), "enologo", Instant.now().plusSeconds(86400),
-            "MEDIUM", "ANALYSIS_REQUIRED", null));
-        assertEquals("IN_PROGRESS", tasks.start(task.code()).status());
-        assertEquals("DONE", tasks.complete(task.code(),
-            new CompleteTaskRequest("Reviewed", "No action required", sampleCode, null, null)).status());
-        String incidentCode = "INC-" + suffix;
-        jdbc.update("insert into incident(id, code, deposit_id, priority, title) "
-                + "values (?, ?, ?, 'HIGH'::alert_priority, ?)", UUID.randomUUID(), incidentCode,
-            transferred.id(), "Manual validation required");
-        assertEquals("IN_REVIEW", incidents.acknowledge(incidentCode).status());
-        assertEquals("ASSIGNED", incidents.assign(incidentCode, "enologo").status());
-        assertTrue(incidents.silence(incidentCode, Instant.now().plusSeconds(3600), "Investigating")
-            .silencedUntil().isAfter(Instant.now()));
-        assertEquals("RESOLVED", incidents.close(incidentCode,
-            new ResolveIncidentRequest("Measurement reviewed", null), false).status());
         LocalDateTime exitTime = LocalDateTime.now(TIMEZONE).minusMinutes(20);
         movements.register(new MovementRequest("Salida", exitTime.toLocalDate(),
             exitTime.toLocalTime().withNano(0), "enologo", "Final dispatch", source, null,

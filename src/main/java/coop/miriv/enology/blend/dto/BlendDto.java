@@ -13,14 +13,12 @@ public final class BlendDto {
     private BlendDto() {}
 
     public record BlendSummary(UUID id, String name, String status, String destinationDepositCode, String author,
-                               Instant updatedAt, String taskCode) {}
+                               Instant updatedAt) {}
 
     public record BlendView(UUID id, String name, String status, String destinationDepositCode, JsonNode payload,
-                            JsonNode result, String author, int version, Instant updatedAt, String taskCode,
+                            JsonNode result, String author, int version, Instant updatedAt,
                             java.util.List<String> plannedMovements) {}
 
     public record BlendRequest(@NotBlank @Size(max = 120) String name, @Size(max = 40) String destinationDepositCode,
                                @NotNull JsonNode payload, JsonNode result, Integer version) {}
-
-    public record ConvertRequest(@NotBlank String responsible, @NotNull Instant dueAt, String priority) {}
 }

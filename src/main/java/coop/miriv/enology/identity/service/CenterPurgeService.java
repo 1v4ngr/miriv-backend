@@ -35,10 +35,7 @@ public class CenterPurgeService {
         COUNTED.put("Movimientos", "p_mov");
         COUNTED.put("Muestras", "p_sample");
         COUNTED.put("Análisis", "p_analysis");
-        COUNTED.put("Incidencias", "p_inc");
-        COUNTED.put("Tareas", "p_task");
-        COUNTED.put("Operaciones", "p_op");
-        COUNTED.put("Planes de elaboración", "p_plan");
+        COUNTED.put("Planes", "p_plan");
         COUNTED.put("Laboratorios", "p_lab");
     }
 
@@ -84,22 +81,11 @@ public class CenterPurgeService {
         jdbc.update("update app_user set center_id = ? where id in (select id from p_super) and center_id = ?", fallback, centerId);
 
         String[] statements = {
-            "delete from blend_simulation where task_id in (select id from p_task)",
-            "delete from task_execution where task_id in (select id from p_task) or sample_id in (select id from p_sample)",
-            "delete from task where id in (select id from p_task)",
-            "delete from incident_evidence where incident_id in (select id from p_inc) or sample_id in (select id from p_sample) "
-                + "or result_id in (select id from p_result)",
-            "delete from incident_event where incident_id in (select id from p_inc)",
-            "delete from incident where id in (select id from p_inc)",
             "update result set supersedes_result_id = null where supersedes_result_id in (select id from p_result)",
             "delete from result where id in (select id from p_result)",
             "delete from analysis where id in (select id from p_analysis)",
             "delete from sample where id in (select id from p_sample)",
-            "delete from operation_addition where operation_id in (select id from p_op)",
-            "delete from operation where id in (select id from p_op)",
             "update elaboration_plan set current_version_id = null where id in (select id from p_plan)",
-            "delete from plan_exception where plan_version_id in (select id from p_pv) or content_unit_id in (select id from p_cu)",
-            "delete from plan_phase_criterion where plan_version_id in (select id from p_pv)",
             "delete from plan_version where id in (select id from p_pv)",
             "delete from elaboration_plan where id in (select id from p_plan)",
             "delete from fermentation_state_review where content_unit_id in (select id from p_cu)",
@@ -110,10 +96,8 @@ public class CenterPurgeService {
             "delete from movement where id in (select id from p_mov)",
             "delete from occupation where content_unit_id in (select id from p_cu) or deposit_id in (select id from p_dep)",
             "delete from content_unit where id in (select id from p_cu)",
-            "delete from lot_origin_line where lot_id in (select id from p_lot)",
             "delete from lot_variety where lot_id in (select id from p_lot)",
             "delete from lot where id in (select id from p_lot)",
-            "delete from deposit_capacity_adjustment where deposit_id in (select id from p_dep)",
             "delete from deposit_cleaning_record where deposit_id in (select id from p_dep)",
             "delete from deposit where id in (select id from p_dep)",
             "delete from app_user_role where zone_id in (select id from p_zone)",
@@ -149,14 +133,13 @@ public class CenterPurgeService {
         String[][] nullable = {
             {"analysis", "validated_by_id"}, {"app_user_permission_grant", "granted_by_id"}, {"audit_log", "author_id"},
             {"deposit_cleaning_record", "responsible_id"}, {"fermentation_state", "confirmed_by_id"},
-            {"incident", "resolved_by_id"}, {"incident", "responsible_id"}, {"incident_event", "created_by_id"},
-            {"result", "validated_by_id"}, {"rule_version", "approved_by_id"}, {"task", "responsible_id"},
+            {"result", "validated_by_id"},
         };
         String[][] mandatory = {
-            {"deposit_capacity_adjustment", "author_id"}, {"elaboration_plan", "responsible_id"},
+            {"elaboration_plan", "responsible_id"},
             {"fermentation_state_review", "reviewed_by_id"}, {"lot", "responsible_id"}, {"movement", "responsible_id"},
-            {"operation", "responsible_id"}, {"plan_exception", "responsible_id"}, {"plan_version", "author_id"},
-            {"result", "created_by_id"}, {"sample", "taken_by_id"}, {"task_execution", "recorded_by_id"},
+            {"plan_version", "author_id"},
+            {"result", "created_by_id"}, {"sample", "taken_by_id"},
         };
         StringBuilder stillReferenced = new StringBuilder("select id from p_user where false");
         for (String[] ref : mandatory) {
@@ -202,15 +185,8 @@ public class CenterPurgeService {
                 + "or deposit_id_at_sampling in (select id from p_dep)",
             "create temp table p_analysis on commit drop as select id from analysis where sample_id in (select id from p_sample)",
             "create temp table p_result on commit drop as select id from result where analysis_id in (select id from p_analysis)",
-            "create temp table p_inc on commit drop as select id from incident where content_unit_id in (select id from p_cu) "
-                + "or deposit_id in (select id from p_dep)",
             "create temp table p_plan on commit drop as select id from elaboration_plan where content_unit_id in (select id from p_cu)",
             "create temp table p_pv on commit drop as select id from plan_version where plan_id in (select id from p_plan)",
-            "create temp table p_task on commit drop as select id from task where content_unit_id in (select id from p_cu) "
-                + "or deposit_id in (select id from p_dep) or source_incident_id in (select id from p_inc) "
-                + "or source_plan_version_id in (select id from p_pv)",
-            "create temp table p_op on commit drop as select id from operation where content_unit_id in (select id from p_cu) "
-                + "or deposit_id in (select id from p_dep)",
             // Users whose only center is this one (by membership or, lacking any, by primary center).
             "create temp table p_only on commit drop as select u.id from app_user u "
                 + "where (u.center_id = '%1$s' or exists (select 1 from app_user_center uc where uc.user_id = u.id and uc.center_id = '%1$s')) "
@@ -222,7 +198,7 @@ public class CenterPurgeService {
         };
         // Dropped first too: impact() and purge() may run inside the same outer transaction.
         jdbc.execute("drop table if exists p_zone, p_dep, p_lot, p_lab, p_cu, p_mov, p_sample, p_analysis, p_result, "
-            + "p_inc, p_plan, p_pv, p_task, p_op, p_only, p_super, p_user");
+            + "p_plan, p_pv, p_only, p_super, p_user");
         for (String sql : temp) jdbc.execute(sql.formatted(c));
     }
 

@@ -246,11 +246,6 @@ public class LaboratoryService {
                     Integer.class, sample.analysisId())),
             null);
 
-        // Evidence and executions point at the sample/results: they keep their note, they lose the link.
-        jdbc.update("update incident_evidence set result_id = null where result_id in "
-            + "(select id from result where analysis_id = ?)", sample.analysisId());
-        jdbc.update("update incident_evidence set sample_id = null where sample_id = ?", sampleId);
-        jdbc.update("update task_execution set sample_id = null where sample_id = ?", sampleId);
         // Corrections chain results to each other; unlink before deleting so no row keeps a dangling parent.
         jdbc.update("update result set supersedes_result_id = null where analysis_id = ?", sample.analysisId());
         jdbc.update("delete from result where analysis_id = ?", sample.analysisId());

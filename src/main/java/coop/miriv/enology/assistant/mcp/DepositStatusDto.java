@@ -31,8 +31,6 @@ public final class DepositStatusDto {
         int windowDays,
         List<ParameterTrend> parameters,
         List<String> alerts,
-        List<String> openIncidents,
-        List<String> pendingTasks,
         List<String> recentEvents,
         List<String> notes
     ) {}

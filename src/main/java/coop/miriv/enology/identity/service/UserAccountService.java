@@ -136,13 +136,7 @@ public class UserAccountService {
 
     @Transactional(readOnly = true)
     public PendingWorkResponse pendingWork(UUID userId) {
-        List<String> tasks = jdbc.query("select code from task where responsible_id = ? "
-                + "and status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status) order by due_at nulls last",
-            (rs, row) -> rs.getString(1), userId);
-        List<String> incidents = jdbc.query("select code from incident where responsible_id = ? "
-                + "and status not in ('RESOLVED'::incident_status, 'DISCARDED'::incident_status) order by opened_at",
-            (rs, row) -> rs.getString(1), userId);
-        return new PendingWorkResponse(tasks, incidents);
+        return new PendingWorkResponse(List.of(), List.of());
     }
 
     @Transactional

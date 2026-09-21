@@ -215,12 +215,9 @@ public class MovementCorrectionService {
     private boolean hasDependants(UUID contentId) {
         Integer count = jdbc.queryForObject("""
             select (select count(*) from sample where content_unit_id = ?)
-                 + (select count(*) from task where content_unit_id = ?)
-                 + (select count(*) from incident where content_unit_id = ?)
-                 + (select count(*) from operation where content_unit_id = ?)
                  + (select count(*) from elaboration_plan where content_unit_id = ?)
                  + (select count(*) from fermentation_state where content_unit_id = ?)
-            """, Integer.class, contentId, contentId, contentId, contentId, contentId, contentId);
+            """, Integer.class, contentId, contentId, contentId);
         return count != null && count > 0;
     }
 

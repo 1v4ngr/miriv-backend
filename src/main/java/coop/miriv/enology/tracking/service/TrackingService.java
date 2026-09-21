@@ -139,7 +139,6 @@ public class TrackingService {
         Set<UUID> ids = rows.keySet();
         List<Event> events = new ArrayList<>();
         events.addAll(movementEvents(ids, rows));
-        events.addAll(operationEvents(ids, rows));
         events.addAll(reviewEvents(ids, rows));
         return events.stream()
             .filter(event -> (from == null || !event.at().isBefore(from)) && (to == null || !event.at().isAfter(to)))
@@ -189,45 +188,6 @@ public class TrackingService {
     private static String movementType(String type) {
         return switch (type) {
             case "TRANSFER_FULL", "TRANSFER_PARTIAL" -> "TRANSFER";
-            default -> type;
-        };
-    }
-
-    private List<Event> operationEvents(Set<UUID> ids, Map<UUID, ContentRow> rows) {
-        String sql = """
-            select o.content_unit_id, o.executed_at, o.type::text type, o.code, o.follow_up_note,
-                   string_agg(trim(concat(a.product_name, ' ', coalesce(a.actual_quantity::text, ''), ' ', coalesce(a.unit, ''))), '; ') additions
-              from operation o left join operation_addition a on a.operation_id = o.id
-             where o.executed_at is not null
-               and o.status in ('EXECUTED'::operation_status, 'EXECUTED_WITH_DEVIATION'::operation_status)
-               and o.content_unit_id in (%s)
-             group by o.id
-            """.formatted(marks(ids.size()));
-        List<Event> out = new ArrayList<>();
-        jdbc.query(sql, (RowCallback) rs -> {
-            ContentRow row = rows.get(rs.getObject("content_unit_id", UUID.class));
-            if (row == null) return;
-            String additions = rs.getString("additions");
-            String note = rs.getString("follow_up_note");
-            out.add(new Event(row.code(), instant(rs, "executed_at"), "OPERATION", operationLabel(rs.getString("type")),
-                (additions == null || additions.isBlank() ? "" : additions + " · ") + rs.getString("code")
-                    + (note == null || note.isBlank() ? "" : " · " + note)));
-        }, ids.toArray());
-        return out;
-    }
-
-    private static String operationLabel(String type) {
-        return switch (type) {
-            case "INOCULATION" -> "Inoculación";
-            case "NUTRITION" -> "Nutrición";
-            case "SULFITING" -> "Sulfitado";
-            case "CORRECTION" -> "Corrección";
-            case "PUMP_OVER" -> "Remontado";
-            case "AERATION" -> "Aireación";
-            case "SETPOINT_CHANGE" -> "Cambio de consigna";
-            case "FILTRATION" -> "Filtración";
-            case "STABILIZATION" -> "Estabilización";
-            case "CLEANING" -> "Limpieza";
             default -> type;
         };
     }
@@ -292,16 +252,6 @@ public class TrackingService {
             openSamples.put(id, rs.getInt("open_count"));
             lastSample.put(id, instant(rs, "last_taken"));
         }, ids.toArray());
-        Map<UUID, Integer> openTasks = new HashMap<>();
-        Map<UUID, Instant> nextDue = new HashMap<>();
-        jdbc.query("select content_unit_id, count(*) n, min(due_at) next_due from task where content_unit_id in ("
-                + marks(ids.size()) + ") and status in ('PENDING'::task_status, 'IN_PROGRESS'::task_status) "
-                + "group by content_unit_id", (RowCallback) rs -> {
-            UUID id = rs.getObject("content_unit_id", UUID.class);
-            openTasks.put(id, rs.getInt("n"));
-            nextDue.put(id, instant(rs, "next_due"));
-        }, ids.toArray());
-
         // Latest two readings per content and parameter, in one query.
         Map<String, List<Reading>> readings = new HashMap<>();
         for (RawReading raw : latestReadings(ids, parameters.stream().map(ParameterInfo::code).toList(), 2)) {
@@ -328,7 +278,7 @@ public class TrackingService {
             rows.add(new OverviewRow(active.content(), active.deposit(), active.depositName(), active.zone(), active.lot(),
                 active.category(), active.volume(), alcoholic.get(active.id()), malolactic.get(active.id()),
                 openSamples.getOrDefault(active.id(), 0), last == null ? null : ChronoUnit.DAYS.between(last, now),
-                openTasks.getOrDefault(active.id(), 0), nextDue.get(active.id()), statusName(worst), cells));
+                statusName(worst), cells));
         }
         // Most worrying first: worst status, then longest without a sample (never sampled counts as longest), then tank.
         rows.sort(Comparator.<OverviewRow>comparingInt(row -> -rank(row.worstStatus()))

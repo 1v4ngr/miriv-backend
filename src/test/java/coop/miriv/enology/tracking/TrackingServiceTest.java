@@ -57,7 +57,7 @@ class TrackingServiceTest extends IntegrationTest {
         zone = UUID.randomUUID();
         jdbc.update("insert into zone(id, center_id, code, name) values (?, ?, 'Z-TRK', 'Zona seguimiento')", zone, CENTER);
         UUID category = jdbc.queryForObject("select id from internal_category where code = 'RED'", UUID.class);
-        UUID color = jdbc.queryForObject("select id from color limit 1", UUID.class);
+        UUID color = UUID.randomUUID();
         UUID destination = jdbc.queryForObject("select id from destination limit 1", UUID.class);
         content1 = content("T1", category, color, destination);
         content2 = content("T2", category, color, destination);
@@ -111,7 +111,7 @@ class TrackingServiceTest extends IntegrationTest {
     @Test
     void seriesCanFollowTheWineBackToItsAncestors() {
         UUID category = jdbc.queryForObject("select id from internal_category where code = 'RED'", UUID.class);
-        UUID color = jdbc.queryForObject("select id from color limit 1", UUID.class);
+        UUID color = UUID.randomUUID();
         UUID destination = jdbc.queryForObject("select id from destination limit 1", UUID.class);
         UUID child = content("T3", category, color, destination);
         UUID movement = movement("M-ANC", "TRANSFER_FULL", content1, content2);
@@ -130,23 +130,16 @@ class TrackingServiceTest extends IntegrationTest {
     }
 
     @Test
-    void eventsCombineMovementsOperationsAndStateReviews() {
+    void eventsCombineMovementsAndStateReviews() {
         movement("M-1", "TRANSFER_FULL", content1, content2);
-        UUID operation = UUID.randomUUID();
-        jdbc.update("insert into operation(id, code, type, content_unit_id, deposit_id, responsible_id, executed_at, status) "
-                + "values (?, 'OP-TRK', 'SULFITING'::operation_type, ?, (select deposit_id from occupation where content_unit_id = ?), ?, ?, 'EXECUTED'::operation_status)",
-            operation, content1, content1, admin, Timestamp.from(now.minus(2, ChronoUnit.DAYS)));
-        jdbc.update("insert into operation_addition(id, operation_id, product_name, actual_quantity, unit) values (?, ?, 'SO2', 5, 'g/hL')",
-            UUID.randomUUID(), operation);
         jdbc.update("insert into fermentation_state_review(id, content_unit_id, process, previous_status, decision, reason, reviewed_by_id, reviewed_at) "
                 + "values (?, ?, 'ALCOHOLIC'::fermentation_process, 'En curso', 'Terminada', 'Densidad estable', ?, ?)",
             UUID.randomUUID(), content1, admin, Timestamp.from(now.minus(1, ChronoUnit.DAYS)));
 
         var events = tracking.events(List.of("C-T1", "C-T2"), null, null);
 
-        assertEquals(java.util.Set.of("TRANSFER", "OPERATION", "STATE_REVIEW"),
+        assertEquals(java.util.Set.of("TRANSFER", "STATE_REVIEW"),
             events.stream().filter(e -> e.content().equals("C-T1")).map(e -> e.type()).collect(java.util.stream.Collectors.toSet()));
-        assertTrue(events.stream().anyMatch(e -> e.type().equals("OPERATION") && e.label().equals("Sulfitado") && e.detail().contains("SO2")));
         assertTrue(events.stream().anyMatch(e -> e.content().equals("C-T2") && e.label().startsWith("Trasiego")),
             "the destination content gets the transfer too");
         assertTrue(events.get(0).at().isBefore(events.get(events.size() - 1).at()) || events.size() == 1, "sorted by time");
@@ -258,8 +251,8 @@ class TrackingServiceTest extends IntegrationTest {
         UUID content = UUID.randomUUID();
         jdbc.update("insert into deposit(id, code, center_id, zone_id, useful_capacity_liters) values (?, ?, ?, ?, 10000)",
             deposit, "D-" + suffix, CENTER, zone);
-        jdbc.update("insert into lot(id, code, campaign, category_id, color_id, destination_id, entry_date, responsible_id, center_id) "
-            + "values (?, ?, 2026, ?, ?, ?, current_date, ?, ?)", lot, "L-" + suffix, category, color, destination, admin, CENTER);
+        jdbc.update("insert into lot(id, code, campaign, category_id, destination_id, entry_date, responsible_id, center_id) "
+            + "values (?, ?, 2026, ?, ?, current_date, ?, ?)", lot, "L-" + suffix, category, destination, admin, CENTER);
         jdbc.update("insert into content_unit(id, code, lot_id, category_id, volume_liters) values (?, ?, ?, ?, 1000)",
             content, "C-" + suffix, lot, category);
         jdbc.update("insert into occupation(id, content_unit_id, deposit_id, start_at, volume_liters) values (?, ?, ?, ?, 1000)",

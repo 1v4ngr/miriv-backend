@@ -70,14 +70,13 @@ class AlertServiceTest extends IntegrationTest {
 
     private UUID tank(String suffix, String category, String phase) {
         UUID categoryId = jdbc.queryForObject("select id from internal_category where code = ?", UUID.class, category);
-        UUID color = jdbc.queryForObject("select id from color limit 1", UUID.class);
         UUID destination = jdbc.queryForObject("select id from destination limit 1", UUID.class);
         UUID lot = UUID.randomUUID();
         UUID content = UUID.randomUUID();
         UUID deposit = UUID.randomUUID();
         jdbc.update("insert into deposit(id, code, center_id, zone_id, useful_capacity_liters) values (?, ?, ?, ?, 10000)", deposit, "D-" + suffix, CENTER, zone);
-        jdbc.update("insert into lot(id, code, campaign, category_id, color_id, destination_id, entry_date, responsible_id, center_id) "
-            + "values (?, ?, 2026, ?, ?, ?, current_date, ?, ?)", lot, "L-" + suffix, categoryId, color, destination, admin, CENTER);
+        jdbc.update("insert into lot(id, code, campaign, category_id, destination_id, entry_date, responsible_id, center_id) "
+            + "values (?, ?, 2026, ?, ?, current_date, ?, ?)", lot, "L-" + suffix, categoryId, destination, admin, CENTER);
         jdbc.update("insert into content_unit(id, code, lot_id, category_id, volume_liters) values (?, ?, ?, ?, 1000)", content, "C-" + suffix, lot, categoryId);
         jdbc.update("insert into occupation(id, content_unit_id, deposit_id, start_at, volume_liters) values (?, ?, ?, ?, 1000)",
             UUID.randomUUID(), content, deposit, Timestamp.from(now.minus(20, ChronoUnit.DAYS)));

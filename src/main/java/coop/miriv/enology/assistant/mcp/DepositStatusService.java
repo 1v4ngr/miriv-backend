@@ -6,10 +6,6 @@ import coop.miriv.enology.assistant.mcp.DepositStatusDto.ParameterTrend;
 import coop.miriv.enology.cellar.dto.DepositResponse;
 import coop.miriv.enology.cellar.dto.OccupationResponse;
 import coop.miriv.enology.cellar.service.DepositService;
-import coop.miriv.enology.incident.dto.IncidentResponse;
-import coop.miriv.enology.incident.service.IncidentService;
-import coop.miriv.enology.task.dto.TaskResponse;
-import coop.miriv.enology.task.service.TaskService;
 import coop.miriv.enology.tracking.dto.TrackingDto.Event;
 import coop.miriv.enology.tracking.dto.TrackingDto.LatestContent;
 import coop.miriv.enology.tracking.dto.TrackingDto.LatestReading;
@@ -32,7 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,18 +49,13 @@ public class DepositStatusService {
     private final DepositService deposits;
     private final TrackingService tracking;
     private final AlertService alerts;
-    private final IncidentService incidents;
-    private final TaskService tasks;
     private final DateTimeFormatter dayFormat;
 
     public DepositStatusService(DepositService deposits, TrackingService tracking, AlertService alerts,
-                                IncidentService incidents, TaskService tasks,
                                 @Value("${app.timezone}") String timezone) {
         this.deposits = deposits;
         this.tracking = tracking;
         this.alerts = alerts;
-        this.incidents = incidents;
-        this.tasks = tasks;
         this.dayFormat = DateTimeFormatter.ofPattern("dd/MM HH:mm", Locale.of("es", "ES")).withZone(ZoneId.of(timezone));
     }
 
@@ -84,7 +74,7 @@ public class DepositStatusService {
             notes.add("El depósito no tiene contenido activo: no hay analíticas en curso.");
             return new DepositStatus(code, deposit.zone(), deposit.status(), deposit.capacityLiters(),
                 deposit.refrigerated(), null, null, null, null, null, null, null, null, null, window,
-                List.of(), alertsFor(code), incidentsFor(code), tasksFor(code), List.of(), notes);
+                List.of(), alertsFor(code), List.of(), notes);
         }
 
         String content = occupation.contentCode();
@@ -113,7 +103,7 @@ public class DepositStatusService {
         return new DepositStatus(code, deposit.zone(), deposit.status(), deposit.capacityLiters(),
             deposit.refrigerated(), content, occupation.lotCode(), occupation.category(), occupation.volumeLiters(),
             fill, occupation.alcoholicState(), occupation.malolacticState(), occupation.entryDate(), days_, window,
-            parameters, alertsFor(code), incidentsFor(code), tasksFor(code), events, notes);
+            parameters, alertsFor(code), events, notes);
     }
 
     /** One trend per parameter that has a current reading, with its points inside the window. */
@@ -222,24 +212,6 @@ public class DepositStatusService {
             .map(alert -> alert.severity() + " · " + alert.rule()
                 + (alert.detail() == null || alert.detail().isBlank() ? "" : ": " + alert.detail())
                 + (alert.since() == null ? "" : " (desde " + dayFormat.format(alert.since()) + ")"))
-            .toList();
-    }
-
-    private List<String> incidentsFor(String deposit) {
-        return incidents.list().stream()
-            .filter(incident -> deposit.equalsIgnoreCase(incident.depositCode()))
-            .filter(incident -> !"CLOSED".equalsIgnoreCase(incident.status()))
-            .map(incident -> incident.code() + " · " + incident.priority() + " · " + incident.title()
-                + " (" + incident.status() + ")")
-            .toList();
-    }
-
-    private List<String> tasksFor(String deposit) {
-        return tasks.list().stream()
-            .filter(task -> deposit.equalsIgnoreCase(task.depositCode()))
-            .filter(task -> !Objects.toString(task.status(), "").matches("(?i)COMPLETED|DONE|CANCELLED|CANCELED"))
-            .map(task -> task.code() + " · " + task.title()
-                + (task.dueAt() == null ? "" : " (vence " + dayFormat.format(task.dueAt()) + ")"))
             .toList();
     }
 }

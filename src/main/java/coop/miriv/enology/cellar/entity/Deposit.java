@@ -62,9 +62,6 @@ public class Deposit {
     @Column(nullable = false, length = 20)
     private DepositStatus status = DepositStatus.AVAILABLE;
 
-    @Column(length = 1000)
-    private String observations;
-
     @Column(nullable = false)
     private boolean active = true;
 
@@ -156,14 +153,6 @@ public class Deposit {
 
     public void setStatus(DepositStatus status) {
         this.status = status;
-    }
-
-    public String getObservations() {
-        return observations;
-    }
-
-    public void setObservations(String observations) {
-        this.observations = observations;
     }
 
     public boolean isActive() {
