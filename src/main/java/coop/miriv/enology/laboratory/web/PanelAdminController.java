@@ -9,6 +9,7 @@ import coop.miriv.enology.laboratory.service.PanelAdminService;
 import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,6 +44,17 @@ public class PanelAdminController {
         return service.updateParameter(code, request);
     }
 
+    /**
+     * Hard delete: removes the parameter from the catalogue. Refused with 409 if any sample result
+     * references it, so the caller can decide whether to delete those rows first or keep the
+     * parameter as inactive instead.
+     */
+    @DeleteMapping("/parameters/{code}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteParameter(@PathVariable String code) {
+        service.deleteParameter(code);
+    }
+
     /** All templates, or only the active ones a category offers (default first) when `category` is given. */
     @GetMapping("/panels")
     public List<PanelView> panels(@RequestParam(required = false) String category) {
@@ -56,5 +68,16 @@ public class PanelAdminController {
     @PutMapping("/panels/{code}")
     public PanelView updatePanel(@PathVariable String code, @Valid @RequestBody PanelUpdateRequest request) {
         return service.updatePanel(code, request);
+    }
+
+    /**
+     * Hard delete: removes the template and its parameter / category assignments. Refused with 409 if
+     * any analysis has been registered against it, so the caller can decide whether to clean those
+     * rows first or keep the template as inactive.
+     */
+    @DeleteMapping("/panels/{code}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePanel(@PathVariable String code) {
+        service.deletePanel(code);
     }
 }

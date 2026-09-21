@@ -26,7 +26,10 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * The parameter catalogue and the analysis templates (panels) built from it, plus which content
  * categories each template serves. Codes are immutable once created — results and rules refer to them —
- * but everything else can be edited; nothing is deleted, only deactivated, so history keeps its meaning.
+ * but everything else can be edited. Hard delete is also available: it removes the row and audits
+ * the operation, but only when nothing in the historical record still points at it
+ * (analyses for panels, results for parameters); otherwise the call is refused with a ConflictException
+ * so the caller can clean the dependent rows first or fall back to deactivation.
  */
 @Service
 public class PanelAdminService {
@@ -84,6 +87,25 @@ public class PanelAdminService {
 
     private ParameterView parameter(String code) {
         return parameters().stream().filter(item -> item.code().equals(code)).findFirst().orElseThrow();
+    }
+
+    /**
+     * Removes the parameter from the catalogue. Refuses if any sample result still references it:
+     * those rows would orphan, so the caller must clean them (or simply keep the parameter as inactive).
+     */
+    @Transactional
+    public void deleteParameter(String code) {
+        UUID id = idOf("parameter", code, "Parámetro no encontrado.");
+        Integer references = jdbc.queryForObject(
+            "select count(*) from result where parameter_id = ?", Integer.class, id);
+        if (references != null && references > 0) {
+            throw new ConflictException("PARAMETER_IN_USE",
+                "No se puede eliminar el parámetro " + code + ": " + references
+                    + " resultado(s) analítico(s) lo siguen usando. Mantenlo como inactivo o elimina primero los resultados.");
+        }
+        int rows = jdbc.update("delete from parameter where id = ?", id);
+        if (rows == 0) throw new NotFoundException("Parámetro no encontrado: " + code);
+        audit.record("parameter", id, "PARAMETER_DELETED", code + " · eliminado a petición del administrador");
     }
 
     private static void checkRange(ParameterRequest request) {
@@ -184,6 +206,28 @@ public class PanelAdminService {
 
     private PanelView panel(String code) {
         return panels().stream().filter(item -> item.code().equals(code)).findFirst().orElseThrow();
+    }
+
+    /**
+     * Removes the template and its parameter / category assignments. Refuses if any analysis has been
+     * registered against it: analyses would orphan and lose their panel reference, so the caller must
+     * clean the dependent rows (or deactivate the panel) instead.
+     */
+    @Transactional
+    public void deletePanel(String code) {
+        UUID id = idOf("analysis_panel", code, "Plantilla no encontrada.");
+        Integer references = jdbc.queryForObject(
+            "select count(*) from analysis where panel_id = ?", Integer.class, id);
+        if (references != null && references > 0) {
+            throw new ConflictException("PANEL_IN_USE",
+                "No se puede eliminar la plantilla " + code + ": " + references
+                    + " análisis la siguen usando. Mantenla como inactiva o elimina primero los análisis.");
+        }
+        // analysis_panel_category cascades on the FK; the join to parameters has to be cleared by hand.
+        jdbc.update("delete from analysis_panel_parameter where panel_id = ?", id);
+        int rows = jdbc.update("delete from analysis_panel where id = ?", id);
+        if (rows == 0) throw new NotFoundException("Plantilla no encontrada: " + code);
+        audit.record("analysis_panel", id, "PANEL_DELETED", code + " · eliminada a petición del administrador");
     }
 
     private List<PanelParameter> panelParameters(UUID panelId) {

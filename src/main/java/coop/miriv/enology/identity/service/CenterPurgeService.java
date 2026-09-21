@@ -107,6 +107,7 @@ public class CenterPurgeService {
         };
         for (String sql : statements) jdbc.update(sql);
         jdbc.update("delete from blend_simulation where center_id = ?", centerId);
+        jdbc.update("delete from report_job where center_id = ?", centerId);
         jdbc.update("delete from alert_rule where center_id = ?", centerId);   // its acknowledgements go with it (ON DELETE CASCADE)
 
         List<String> deactivated = removeUsers(centerId);
