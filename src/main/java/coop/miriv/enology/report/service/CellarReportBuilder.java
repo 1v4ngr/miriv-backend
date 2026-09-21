@@ -238,7 +238,7 @@ public class CellarReportBuilder {
             int samples = (int) rows.stream().map(AnalyticRow::sampleCode).distinct().count();
             List<Event> contentEvents = events.getOrDefault(row.content(), List.of()).stream()
                 .filter(event -> !event.at().isBefore(from) && !event.at().isAfter(to))
-                .map(event -> new Event(event.at(), event.type(), event.label(), event.detail())).toList();
+                .map(event -> new Event(event.at(), event.type(), readable(event.label()), readable(event.detail()))).toList();
             List<Alert> contentAlerts = alerts.getOrDefault(row.content(), List.of()).stream()
                 .map(alert -> new Alert(alert.rule(), alert.severity(), alert.since(), alert.detail())).toList();
             Integer fill = row.capacity() == null || row.capacity().signum() == 0 || row.volume() == null ? null
@@ -270,7 +270,7 @@ public class CellarReportBuilder {
 
         Meta meta = new Meta(code, title, context.center().getName(), context.user().getFullName(), now, periodMode,
             rangeFrom, rangeTo, includeProvisional, describe(scope, periodMode, phases), zone.getId());
-        return new CellarReport(meta, counts, deposits, empty, allRows, refs);
+        return new CellarReport(meta, counts, deposits, empty, allRows, refs, List.copyOf(catalog.values()));
     }
 
     // ------------------------------------------------------------------ form options
@@ -476,13 +476,20 @@ public class CellarReportBuilder {
             : rows.stream().map(row -> row.parameter().code()).distinct().limit(MAX_NO_PHASE_PARAMETERS).toList();
         Map<String, List<AnalyticRow>> byParameter = rows.stream()
             .collect(Collectors.groupingBy(row -> row.parameter().code(), LinkedHashMap::new, Collectors.toList()));
-        List<Series> series = new ArrayList<>();
+        // The table keeps the phase's own columns (it has to fit the page); the charts cover every parameter
+        // analysed in the stretch: the phase's first, in its order, then the rest in catalogue order.
         List<Parameter> columns = new ArrayList<>();
         for (String code : codes) {
             Parameter parameter = catalog.get(code);
+            if (parameter != null && byParameter.containsKey(code)) columns.add(parameter);
+        }
+        List<String> charted = new ArrayList<>(codes);
+        catalog.keySet().stream().filter(code -> byParameter.containsKey(code) && !charted.contains(code)).forEach(charted::add);
+        List<Series> series = new ArrayList<>();
+        for (String code : charted) {
+            Parameter parameter = catalog.get(code);
             List<AnalyticRow> values = byParameter.getOrDefault(code, List.of());
             if (parameter == null || values.isEmpty()) continue;
-            columns.add(parameter);
             List<Point> points = values.stream().filter(row -> row.value() != null && !"NOT_MEASURED".equals(row.qualifier()))
                 .map(row -> new Point(row.takenAt(), row.value(), row.qualifier(), row.limit(), row.validated(), row.sampleCode(), row.status()))
                 .toList();
@@ -557,6 +564,16 @@ public class CellarReportBuilder {
             default -> "desde la entrada en el depósito actual";
         });
         return String.join(" · ", parts);
+    }
+
+    /** State reviews carry state codes (FINISHED…); the report shows the Spanish labels. */
+    private static String readable(String text) {
+        if (text == null) return null;
+        String out = text;
+        for (Map.Entry<String, String> entry : coop.miriv.enology.report.render.Html.STATE_LABELS.entrySet()) {
+            out = out.replaceAll("\\b" + entry.getKey() + "\\b", entry.getValue().toLowerCase(Locale.ROOT));
+        }
+        return out;
     }
 
     static PhaseRef ref(Phase phase, Map<String, String> categoryNames) {

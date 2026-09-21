@@ -11,7 +11,6 @@
 --
 -- Columnas dentro de tablas que se conservan (no afectan a nada que ya esté vivo):
 --   * deposit.observations             (setter expuesto pero nunca llamado)
---   * parameter_method.detection_limit / quantification_limit
 --   * content_unit_lineage.note
 --   * lot.color_id, content_unit.color_id, elaboration_plan.destination_id? -> no, destination sí se usa
 --
@@ -27,8 +26,6 @@ alter table content_unit drop column if exists color_id;
 
 -- 2) Columnas muertas que no se leen en producción.
 alter table deposit drop column if exists observations;
-alter table parameter_method drop column if exists detection_limit;
-alter table parameter_method drop column if exists quantification_limit;
 alter table content_unit_lineage drop column if exists note;
 
 -- 3) Tablas de catálogo administrativo nunca consultadas.

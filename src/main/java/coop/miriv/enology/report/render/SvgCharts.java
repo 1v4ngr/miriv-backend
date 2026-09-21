@@ -50,13 +50,21 @@ public final class SvgCharts {
                               String color, ZoneId zone, double displayWidth) {
         double plotW = W - LEFT - RIGHT;
         double plotH = H - TOP - BOTTOM;
-        long start = from.toEpochMilli();
-        long end = Math.max(to.toEpochMilli(), start + 3_600_000L);
+        // X domain: the measured values (a phase may start long before its first sample), a day either side of
+        // a single value; never outside [from, to] unless a value is.
+        long start = Long.MAX_VALUE;
+        long end = Long.MIN_VALUE;
         for (Point point : points) {
             start = Math.min(start, point.at().toEpochMilli());
             end = Math.max(end, point.at().toEpochMilli());
         }
-        long pad = Math.max((end - start) / 40, 1_800_000L);
+        if (start == Long.MAX_VALUE) { start = from.toEpochMilli(); end = to.toEpochMilli(); }
+        if (end - start < 86_400_000L) {
+            long middle = (start + end) / 2;
+            start = Math.max(Math.min(from.toEpochMilli(), start), middle - 86_400_000L);
+            end = Math.min(Math.max(to.toEpochMilli(), end), middle + 86_400_000L);
+        }
+        long pad = Math.max((end - start) / 25, 1_800_000L);
         long x0 = start - pad;
         long x1 = end + pad;
 
@@ -93,7 +101,7 @@ public final class SvgCharts {
 
         StringBuilder svg = new StringBuilder();
         svg.append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ").append(fmt(W)).append(' ').append(fmt(H))
-            .append("\" width=\"").append(fmt(displayWidth)).append("\" height=\"").append(fmt(displayWidth * H / W)).append("\">");
+            .append("\" ").append(size(displayWidth, displayWidth * H / W)).append(">");
         svg.append(rect(LEFT, TOP, plotW, plotH, "#ffffff", null));
 
         // Target bands: red beyond critical, amber between warning and critical.
@@ -122,15 +130,19 @@ public final class SvgCharts {
 
         // X ticks.
         Duration span = Duration.ofMillis(x1 - x0);
-        DateTimeFormatter format = DateTimeFormatter.ofPattern(span.toHours() <= 48 ? "dd/MM HH:mm" : "dd/MM", ES).withZone(zone);
+        DateTimeFormatter format = DateTimeFormatter.ofPattern(span.toHours() <= 96 ? "dd/MM HH'h'" : "dd/MM", ES).withZone(zone);
         int count = 5;
+        String previousLabel = null;
         for (int i = 0; i <= count; i++) {
             long millis = x0 + (x1 - x0) * i / count;
+            String tickLabel = format.format(Instant.ofEpochMilli(millis));
+            if (tickLabel.equals(previousLabel)) continue;
+            previousLabel = tickLabel;
             double x = sx.applyAsDouble(millis);
             svg.append("<line x1=\"").append(fmt(x)).append("\" y1=\"").append(fmt(TOP + plotH)).append("\" x2=\"").append(fmt(x))
                 .append("\" y2=\"").append(fmt(TOP + plotH + 3)).append("\" stroke=\"").append(AXIS).append("\" stroke-width=\"0.8\"/>");
             String anchor = i == 0 ? "start" : i == count ? "end" : "middle";
-            svg.append(text(x, TOP + plotH + 14, format.format(Instant.ofEpochMilli(millis)), anchor, AXIS, 9));
+            svg.append(text(x, TOP + plotH + 14, tickLabel, anchor, AXIS, 9));
         }
 
         // Events as thin vertical lines.
@@ -188,7 +200,7 @@ public final class SvgCharts {
         long end = Math.max(to.toEpochMilli(), start + 1);
         StringBuilder svg = new StringBuilder();
         svg.append("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 ").append(fmt(width)).append(' ').append(fmt(height))
-            .append("\" width=\"").append(fmt(displayWidth)).append("\" height=\"").append(fmt(displayWidth * height / width)).append("\">");
+            .append("\" ").append(size(displayWidth, displayWidth * height / width)).append(">");
         svg.append("<rect x=\"0\" y=\"4\" width=\"").append(fmt(width)).append("\" height=\"14\" rx=\"7\" fill=\"#f3e7ee\"/>");
         List<double[]> spans = new ArrayList<>();
         for (Segment segment : segments) {
@@ -299,6 +311,13 @@ public final class SvgCharts {
         int decimals = step >= 1 ? 0 : (int) Math.min(4, Math.ceil(-Math.log10(step) - 1e-9));
         String text = String.format(ES, "%." + decimals + "f", tick);
         return "-0".equals(text) ? "0" : text;
+    }
+
+    /** Integer width / height: the PDF engine mis-sizes an SVG whose size attributes carry decimals. */
+    static String size(double width, double height) {
+        long w = Math.round(width);
+        long h = Math.max(1, Math.round(height));
+        return "width=\"" + w + "\" height=\"" + h + "\" style=\"width:" + w + "px;height:" + h + "px\"";
     }
 
     static String fmt(double value) {

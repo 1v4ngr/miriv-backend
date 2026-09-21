@@ -9,7 +9,15 @@ import java.util.List;
  * files of a report always carry exactly the same data.
  */
 public record CellarReport(Meta meta, List<PhaseCount> phaseCounts, List<DepositReport> deposits,
-                           List<EmptyDeposit> emptyDeposits, List<AnalyticRow> rows, List<PhaseRef> phases) {
+                           List<EmptyDeposit> emptyDeposits, List<AnalyticRow> rows, List<PhaseRef> phases,
+                           List<Parameter> catalog) {
+
+    /** Names for parameter codes, falling back to the code. */
+    public String parameterNames(List<String> codes) {
+        java.util.Map<String, String> names = new java.util.HashMap<>();
+        catalog.forEach(parameter -> names.put(parameter.code(), parameter.name()));
+        return String.join(", ", codes.stream().map(code -> names.getOrDefault(code, code)).toList());
+    }
 
     /** from / to null = each deposit uses its own start (entry or content start) / now. */
     public record Meta(String code, String title, String centerName, String author, Instant generatedAt,

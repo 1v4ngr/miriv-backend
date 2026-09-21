@@ -10,7 +10,7 @@
 -- 2) report_job: every issued report, immutable once AVAILABLE (RF-INF-01). Correcting a result later does
 --    not change an issued report: a new one is generated. The PDF and the raw .xlsx are stored side by side.
 
-create table report_phase (
+create table if not exists report_phase (
     id                 uuid primary key default gen_random_uuid(),
     code               varchar(40) not null unique,
     name               varchar(120) not null,
@@ -42,9 +42,10 @@ insert into report_phase (code, name, description, color, position, category_cod
    '["L_MALIC_ACID", "MALIC_ACID", "L_LACTIC_ACID", "VOLATILE_ACIDITY", "PH", "FREE_SO2", "CONTENT_TEMPERATURE"]'),
   ('WINE', 'Vino / conservación', 'Vino hecho: conservación y estabilidad.', '#6d4656', 4,
    '[]', '[]', '[]',
-   '["FREE_SO2", "TOTAL_SO2", "VOLATILE_ACIDITY", "PH", "TOTAL_ACIDITY", "ETHANOL", "REDUCING_SUGARS", "L_MALIC_ACID", "COLOR_INTENSITY"]');
+   '["FREE_SO2", "TOTAL_SO2", "VOLATILE_ACIDITY", "PH", "TOTAL_ACIDITY", "ETHANOL", "REDUCING_SUGARS", "L_MALIC_ACID", "COLOR_INTENSITY"]')
+on conflict (code) do nothing;
 
-create table report_job (
+create table if not exists report_job (
     id                   uuid primary key default gen_random_uuid(),
     code                 varchar(40) not null unique,
     center_id            uuid not null references center (id),
@@ -68,4 +69,4 @@ create table report_job (
 
 comment on table report_job is 'RF-INF-01: issued reports. The stored files never change; corrected data means a new report.';
 
-create index ix_report_job_center_created on report_job (center_id, created_at desc);
+create index if not exists ix_report_job_center_created on report_job (center_id, created_at desc);

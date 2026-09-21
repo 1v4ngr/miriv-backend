@@ -146,7 +146,7 @@ public class ReportPdfRenderer {
             .value { font-size: 9pt; font-weight: 600; margin-top: 2px; }
 
             .kpi { border: 1px solid #eadfe4; border-radius: 12px; padding: 10px 12px; background-color: #fbf8fa; }
-            .kpi .num { font-size: 17pt; font-weight: 700; color: #452833; line-height: 1.1; margin-top: 3px; }
+            .kpi .num { font-size: 15pt; font-weight: 700; color: #452833; line-height: 1.1; margin-top: 3px; }
             .kpi .num.warn { color: #9a6d12; }
             .kpi .num.crit { color: #b3263f; }
 
@@ -156,6 +156,12 @@ public class ReportPdfRenderer {
             .phasebar { border-radius: 6px; }
             .phase-chip { display: inline-block; padding: 2px 8px; border-radius: 9px; color: #ffffff; font-size: 7.4pt; font-weight: 600; }
             .dot { display: inline-block; width: 7px; height: 7px; border-radius: 4px; margin-right: 4px; }
+            .dot.hollow { border: 1.3px solid #6d4656; background-color: #ffffff; }
+            .tri { display: inline-block; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent;
+                   border-top: 7px solid #6d4656; margin-right: 4px; }
+            .band { display: inline-block; width: 14px; height: 7px; margin-right: 4px; }
+            .warnband { background-color: #fbefd8; border-top: 1px dashed #c0902a; }
+            .critband { background-color: #f7e0e6; border-top: 1px dashed #b3263f; }
 
             .list { border: 1px solid #eadfe4; border-radius: 10px; }
             .list th { background-color: #fbf7f9; color: #6f6169; font-size: 6.9pt; font-weight: 600; text-align: left; padding: 5px 6px;
@@ -189,7 +195,7 @@ public class ReportPdfRenderer {
 
             .latest td.card { border: 1px solid #eadfe4; border-radius: 9px; padding: 6px 8px; }
             .latest .pname { font-size: 7pt; color: #6f6169; }
-            .latest .pval { font-size: 11pt; font-weight: 700; font-family: PlexMono; }
+            .latest .pval { font-size: 11pt; font-weight: 500; font-family: PlexMono; }
             .latest .punit { font-size: 7pt; color: #8a7f86; }
 
             .block { margin-top: 16px; }
@@ -236,7 +242,8 @@ public class ReportPdfRenderer {
         long alerts = deposits.stream().mapToLong(d -> d.alerts().size()).sum();
         h.append("<table class=\"grid gap\" style=\"margin-top:12px\"><tr>")
             .append(kpi("Depósitos con contenido", String.valueOf(deposits.size()), ""))
-            .append(kpi("Volumen", Html.number(volume.divide(BigDecimal.valueOf(100), 1, java.math.RoundingMode.HALF_UP), 1) + " hL", ""))
+            .append(kpi("Volumen", Html.number(volume.divide(BigDecimal.valueOf(100), 1, java.math.RoundingMode.HALF_UP),
+                volume.compareTo(BigDecimal.valueOf(10_000)) >= 0 ? 0 : 1) + "\u00A0hL", ""))
             .append(kpi("En aviso", String.valueOf(warn), warn > 0 ? "warn" : ""))
             .append(kpi("En crítico", String.valueOf(crit), crit > 0 ? "crit" : ""))
             .append(kpi("Sin muestra > 7 días", String.valueOf(stale), stale > 0 ? "warn" : ""))
@@ -280,8 +287,8 @@ public class ReportPdfRenderer {
     private void phaseDistribution(StringBuilder h, CellarReport report) {
         int total = report.phaseCounts().stream().mapToInt(PhaseCount::deposits).sum();
         if (total > 0) {
-            StringBuilder svg = new StringBuilder("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1000 16\" width=\"")
-                .append(CONTENT_WIDTH).append("\" height=\"").append(SvgCharts.fmt(CONTENT_WIDTH * 16 / 1000)).append("\">");
+            StringBuilder svg = new StringBuilder("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1000 16\" ")
+                .append(SvgCharts.size(CONTENT_WIDTH, CONTENT_WIDTH * 16 / 1000)).append(">");
             svg.append("<rect x=\"0\" y=\"0\" width=\"1000\" height=\"16\" rx=\"8\" fill=\"#f3e7ee\"/>");
             double x = 0;
             for (PhaseCount count : report.phaseCounts()) {
@@ -296,7 +303,7 @@ public class ReportPdfRenderer {
             svg.append("</svg>");
             h.append("<div>").append(svg).append("</div>");
         }
-        h.append("<table class=\"list\" style=\"margin-top:8px\"><tr><th>Fase</th><th class=\"right\">Depósitos</th>")
+        h.append("<table class=\"list\" style=\"margin-top:8px\"><tr><th style=\"width:170px\">Fase</th><th class=\"right\">Depósitos</th>")
             .append("<th class=\"right\">Volumen</th><th class=\"right\">En aviso</th><th class=\"right\">En crítico</th>")
             .append("<th>Parámetros que se siguen</th></tr>");
         for (PhaseCount count : report.phaseCounts()) {
@@ -312,16 +319,7 @@ public class ReportPdfRenderer {
     }
 
     private static String parameterNames(PhaseRef phase, CellarReport report) {
-        if (phase.parameters().isEmpty()) return "Los que tengan datos";
-        java.util.Map<String, String> names = new java.util.HashMap<>();
-        report.rows().forEach(row -> names.putIfAbsent(row.parameter().code(), row.parameter().name()));
-        report.deposits().forEach(d -> d.blocks().forEach(b -> b.columns().forEach(c -> names.putIfAbsent(c.code(), c.name()))));
-        return String.join(", ", phase.parameters().stream().map(code -> names.getOrDefault(code, prettyCode(code))).toList());
-    }
-
-    private static String prettyCode(String code) {
-        String lower = code.replace('_', ' ').toLowerCase(java.util.Locale.ROOT);
-        return Character.toUpperCase(lower.charAt(0)) + lower.substring(1);
+        return phase.parameters().isEmpty() ? "Los que tengan datos" : report.parameterNames(phase.parameters());
     }
 
     private void summaryTable(StringBuilder h, CellarReport report, ZoneId zone) {
@@ -339,7 +337,7 @@ public class ReportPdfRenderer {
             long daysInPhase = d.phaseSince() == null ? 0 : Duration.between(d.phaseSince(), report.meta().generatedAt()).toDays();
             h.append("<tr><td class=\"nowrap\"><b>").append(escape(d.deposit())).append("</b>")
                 .append(d.zone() == null ? "" : "<div class=\"tiny soft\">" + escape(d.zone()) + "</div>").append("</td>")
-                .append("<td class=\"mono small\">").append(escape(d.content())).append("<div class=\"tiny soft\">")
+                .append("<td class=\"mono small nowrap\">").append(escape(d.content())).append("<div class=\"tiny soft\">")
                 .append(escape(d.lot())).append("</div></td>")
                 .append("<td>").append(escape(d.categoryName() == null ? "—" : d.categoryName())).append("</td>")
                 .append("<td class=\"num\">").append(escape(Html.liters(d.volumeLiters())))
@@ -362,9 +360,9 @@ public class ReportPdfRenderer {
         for (String code : codes) {
             Latest latest = d.latest().stream().filter(item -> item.parameter().code().equals(code)).findFirst().orElse(null);
             if (latest == null) continue;
-            parts.add("<span class=\"nowrap\">" + escape(latest.parameter().name()) + " <b class=\"mono st-" + latest.row().status() + "\">"
+            parts.add("<span class=\"nowrap\">" + escape(latest.parameter().name()) + " <span style=\"font-weight:500\" class=\"mono st-" + latest.row().status() + "\">"
                 + escape(Html.result(latest.row().value(), latest.row().qualifier(), latest.row().limit(), latest.parameter().decimals()))
-                + "</b></span>");
+                + "</span></span>");
             if (parts.size() == 3) break;
         }
         return parts.isEmpty() ? "<span class=\"soft\">Sin datos</span>" : String.join("<br/>", parts);
@@ -398,7 +396,7 @@ public class ReportPdfRenderer {
             .append(fact("Entrada en el depósito", escape(Html.dateTime(d.enteredDeposit(), zone)), true))
             .append(fact("Plan de elaboración", escape(d.plan() == null ? "Sin plan asignado" : d.plan()), true))
             .append("</tr><tr style=\"border-top:1px solid #eadfe4\">")
-            .append(fact("Periodo del informe", escape(Html.date(d.from(), zone) + " – " + Html.date(d.to(), zone)), true))
+            .append(fact("Periodo del informe", escape(Html.shortYearDate(d.from(), zone) + " – " + Html.shortYearDate(d.to(), zone)), true))
             .append(fact("Muestras en el periodo", String.valueOf(d.sampleCount()), true))
             .append(fact("Última muestra", escape(Html.dateTime(d.lastSampleAt(), zone)), true))
             .append(fact("Estado analítico", badge(d.worstStatus()), true))
@@ -519,7 +517,7 @@ public class ReportPdfRenderer {
             .append("</div></div>");
 
         if (block.series().isEmpty()) {
-            h.append("<div class=\"empty\">Sin analíticas de los parámetros de esta fase entre esas fechas.</div></div>");
+            h.append("<div class=\"empty\">Sin analíticas entre esas fechas.</div></div>");
             return;
         }
 
@@ -531,19 +529,21 @@ public class ReportPdfRenderer {
             h.append("<tr>");
             for (int j = i; j < i + 2; j++) {
                 h.append("<td style=\"width:50%\">");
-                if (j < series.size()) chart(h, series.get(j), events, segment, d.phase().color(), zone);
+                if (j < series.size()) chart(h, series.get(j), events, segment, segment.phase().color(), zone);
                 h.append("</td>");
             }
             h.append("</tr>");
         }
         h.append("</table>");
         h.append("<div class=\"legend\">")
-            .append("<span>").append(SvgCharts.swatch(SvgCharts.OK, false, false)).append(" correcto</span>")
-            .append("<span>").append(SvgCharts.swatch(SvgCharts.WARN, false, false)).append(" aviso</span>")
-            .append("<span>").append(SvgCharts.swatch(SvgCharts.CRIT, false, false)).append(" crítico</span>")
-            .append("<span>").append(SvgCharts.swatch(PLUM, true, false)).append(" provisional</span>")
-            .append("<span>").append(SvgCharts.swatch(PLUM, false, true)).append(" menor que el límite</span>")
-            .append("<span>franjas: ámbar = fuera de aviso, rojo = fuera de crítico · líneas verticales = movimientos y revisiones</span>")
+            .append("<span><span class=\"dot\" style=\"background-color:").append(SvgCharts.OK).append("\"></span>correcto</span>")
+            .append("<span><span class=\"dot\" style=\"background-color:").append(SvgCharts.WARN).append("\"></span>aviso</span>")
+            .append("<span><span class=\"dot\" style=\"background-color:").append(SvgCharts.CRIT).append("\"></span>crítico</span>")
+            .append("<span><span class=\"dot hollow\"></span>provisional</span>")
+            .append("<span><span class=\"tri\"></span>menor que el límite</span>")
+            .append("<span><span class=\"band warnband\"></span>fuera de aviso</span>")
+            .append("<span><span class=\"band critband\"></span>fuera de crítico</span>")
+            .append("<span>líneas verticales: movimientos y revisiones</span>")
             .append("</div>");
 
         // Table of values, in chunks of columns.
@@ -563,7 +563,7 @@ public class ReportPdfRenderer {
                 for (int c = start; c < end; c++) any |= row.cells().get(c) != null;
                 if (!any) continue;
                 h.append("<tr><td class=\"nowrap\">").append(escape(Html.dateTime(row.takenAt(), zone))).append("</td>")
-                    .append("<td class=\"mono small").append(row.provisional() ? " prov" : "").append("\">").append(escape(row.sampleCode()))
+                    .append("<td class=\"mono small nowrap").append(row.provisional() ? " prov" : "").append("\">").append(escape(row.sampleCode()))
                     .append(row.provisional() ? " *" : "").append("</td>");
                 for (int c = start; c < end; c++) {
                     Cell cell = row.cells().get(c);
@@ -592,7 +592,7 @@ public class ReportPdfRenderer {
             .append(range == null ? "Sin objetivo definido" : escape(Html.range(range.warnMin(), range.warnMax(), range.critMin(), range.critMax(), p.decimals())))
             .append(" · ").append(series.points().size()).append(series.points().size() == 1 ? " valor" : " valores")
             .append("</div></td><td class=\"right\" style=\"width:90px\"><div class=\"mono st-").append(last.status())
-            .append("\" style=\"font-size:11pt;font-weight:700\">")
+            .append("\" style=\"font-size:11pt;font-weight:500\">")
             .append(escape(Html.result(last.value(), last.qualifier(), last.limit(), p.decimals()))).append("</div>")
             .append("<div class=\"cmeta\">").append(escape(Html.shortDate(last.at(), zone))).append("</div></td></tr></table>");
         h.append(SvgCharts.line(series.points(), range, events, segment.from(), segment.to(), color, zone, CHART_WIDTH));

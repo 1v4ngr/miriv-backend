@@ -85,7 +85,7 @@ public final class Html {
     }
 
     public static String liters(BigDecimal value) {
-        return value == null ? "—" : number(value, 0) + " L";
+        return value == null ? "—" : number(value, 0) + "\u00A0L";
     }
 
     /** The value as the lab reported it: "0,72", "< 0,05", "n.d.", "n.m.". */
@@ -121,12 +121,16 @@ public final class Html {
         return value == null ? "—" : DateTimeFormatter.ofPattern("dd/MM/yyyy", ES).withZone(zone).format(value);
     }
 
+    public static String shortYearDate(Instant value, ZoneId zone) {
+        return value == null ? "—" : DateTimeFormatter.ofPattern("dd/MM/yy", ES).withZone(zone).format(value);
+    }
+
     public static String shortDate(Instant value, ZoneId zone) {
         return value == null ? "—" : DateTimeFormatter.ofPattern("dd/MM", ES).withZone(zone).format(value);
     }
 
     public static String dateTime(Instant value, ZoneId zone) {
-        return value == null ? "—" : DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm", ES).withZone(zone).format(value);
+        return value == null ? "—" : DateTimeFormatter.ofPattern("dd/MM/yyyy'\u00A0'HH:mm", ES).withZone(zone).format(value);
     }
 
     public static String longDateTime(Instant value, ZoneId zone) {
@@ -134,6 +138,6 @@ public final class Html {
     }
 
     public static String days(long days) {
-        return days == 1 ? "1 día" : days + " días";
+        return days == 1 ? "1\u00A0día" : days + "\u00A0días";
     }
 }

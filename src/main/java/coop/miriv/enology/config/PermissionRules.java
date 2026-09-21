@@ -29,6 +29,7 @@ public final class PermissionRules {
         rule(null, "/api/admin/zones/**", "ORG_MANAGE"),
         rule(null, "/api/admin/laboratories/**", "ORG_MANAGE"),
         rule(null, "/api/admin/parameter-targets/**", "LAB_CATALOG_MANAGE"),
+        rule(null, "/api/admin/report-phases/**", "LAB_CATALOG_MANAGE"),
         rule(null, "/api/admin/alert-rules/**", "RULE_EDIT"),
         rule(POST, "/api/tracking/alerts/**", "INCIDENT_ACKNOWLEDGE"),
         rule(PUT, "/api/tracking/contents/**", "RULE_EDIT"),

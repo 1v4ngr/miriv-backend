@@ -2,15 +2,15 @@
 -- is assigned to the content categories it is meant for: a must is analysed with the fermentation
 -- control, a finished wine with the wine analysis.
 
-alter table parameter add column active boolean not null default true;
-alter table analysis_panel add column active boolean not null default true;
+alter table parameter add column if not exists active boolean not null default true;
+alter table analysis_panel add column if not exists active boolean not null default true;
 
 -- Parameters keep the order the laboratory reads them in.
-alter table analysis_panel_parameter add column position integer not null default 0;
+alter table analysis_panel_parameter add column if not exists position integer not null default 0;
 update analysis_panel_parameter pp set position = ordered.rn
   from (select pp2.id, row_number() over (partition by pp2.panel_id order by par.name) as rn
           from analysis_panel_parameter pp2 join parameter par on par.id = pp2.parameter_id) ordered
- where ordered.id = pp.id;
+ where ordered.id = pp.id and pp.position = 0;
 
 -- The names the laboratory already uses on screen become the stored names (the sample form used to
 -- map them by hand: Control, Ampliado, Reducido, Maloláctica).
@@ -20,14 +20,14 @@ update analysis_panel set description = 'Panel reducido de tres parámetros.' wh
 -- A catalogue name still in English from V13.
 update parameter set name = 'Alcohol probable' where code = 'POTENTIAL_ALCOHOL' and name = 'Potential alcohol';
 
-create table analysis_panel_category (
+create table if not exists analysis_panel_category (
     panel_id     uuid not null references analysis_panel (id) on delete cascade,
     category_id  uuid not null references internal_category (id) on delete cascade,
     is_default   boolean not null default false,
     primary key (panel_id, category_id)
 );
 -- A category may offer several templates, but only one is proposed by default.
-create unique index uq_panel_category_default on analysis_panel_category (category_id) where is_default;
+create unique index if not exists uq_panel_category_default on analysis_panel_category (category_id) where is_default;
 
 comment on table analysis_panel_category is
     'Which analysis templates a content category offers; the default one is proposed when a sample is registered.';

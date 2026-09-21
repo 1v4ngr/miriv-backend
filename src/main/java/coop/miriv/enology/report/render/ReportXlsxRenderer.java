@@ -109,7 +109,7 @@ public class ReportXlsxRenderer {
             number(row, 2, count.volumeLiters(), s.integer);
             number(row, 3, count.warn(), s.integer);
             number(row, 4, count.crit(), s.integer);
-            text(row, 5, String.join(", ", count.phase().parameters()), s.text);
+            text(row, 5, report.parameterNames(count.phase().parameters()), s.text);
         }
         for (int c = 2; c <= 5; c++) sheet.setColumnWidth(c, (c == 5 ? 60 : 13) * 256);
         r++;
@@ -281,7 +281,7 @@ public class ReportXlsxRenderer {
             text(row, 1, phase.code(), s.mono);
             text(row, 2, phase.name(), s.bold);
             text(row, 3, phase.rule(), s.text);
-            text(row, 4, String.join(", ", phase.parameters()), s.text);
+            text(row, 4, report.parameterNames(phase.parameters()), s.text);
             text(row, 5, phase.description(), s.text);
             r++;
         }
