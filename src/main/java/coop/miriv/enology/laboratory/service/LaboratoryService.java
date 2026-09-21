@@ -330,7 +330,7 @@ public class LaboratoryService {
         // F2-03: age is computed client-side via formatRelative(takenAt) instead of a server-side string.
         return new SampleResponse(row.code(), row.originDeposit(), currentDeposit, row.contentCode(), row.lotCode(),
             row.category(), row.takenAt().atZone(timezone).toLocalDateTime().toString(),
-            takenDate, null, panelName(row.panelCode()), completedRequired(row.analysisId(), row.panelId()), required(row.panelId()), status,
+            takenDate, null, row.panelName(), completedRequired(row.analysisId(), row.panelId()), required(row.panelId()), status,
             row.responsible(), false, panelParameters, results, row.observations(),
             row.processedAt() == null ? null : row.processedAt().atZone(timezone).toLocalDate(),
             row.laboratory(), row.equipment(), row.method(), row.validationNote());
@@ -404,7 +404,7 @@ public class LaboratoryService {
         return new SampleRow(rs.getObject("analysis_id", UUID.class), rs.getObject("content_unit_id", UUID.class),
             rs.getObject("panel_id", UUID.class), rs.getString("code"), rs.getString("origin_deposit"),
             rs.getString("content_code"), rs.getString("lot_code"), rs.getString("category"),
-            rs.getTimestamp("taken_at").toInstant(), rs.getString("panel_code"), rs.getString("responsible"),
+            rs.getTimestamp("taken_at").toInstant(), rs.getString("panel_code"), rs.getString("panel_name"), rs.getString("responsible"),
             rs.getString("status"), rs.getString("observations"),
             rs.getTimestamp("processed_at") == null ? null : rs.getTimestamp("processed_at").toInstant(),
             rs.getString("laboratory_name"), rs.getString("equipment"), rs.getString("method_description"),
@@ -428,29 +428,24 @@ public class LaboratoryService {
         return rows.getFirst();
     }
 
+    /**
+     * The template chosen for a new sample, by code or by name (templates are managed in Administración).
+     * The short names the sample form used to hard-code are still understood.
+     */
     private UUID panelId(String value) {
-        String code = switch (value) {
+        String wanted = switch (value.trim()) {
             case "Control" -> "CONTROL";
             case "Ampliado" -> "ROUTINE_COMPLETE";
             case "Reducido" -> "REDUCED";
             case "Maloláctica" -> "MALOLACTIC";
-            default -> value;
+            default -> value.trim();
         };
-        List<UUID> ids = jdbc.query("select id from analysis_panel where code = ?",
-            (rs, index) -> rs.getObject(1, UUID.class), code);
-        if (ids.isEmpty()) throw new NotFoundException("Panel de análisis no encontrado.");
+        List<UUID> ids = jdbc.query("select id from analysis_panel where active and (upper(code) = upper(?) or lower(name) = lower(?))",
+            (rs, index) -> rs.getObject(1, UUID.class), wanted, wanted);
+        if (ids.isEmpty()) throw new NotFoundException("Plantilla de análisis no encontrada o desactivada: " + value);
         return ids.getFirst();
     }
 
-    private String panelName(String code) {
-        return switch (code) {
-            case "CONTROL" -> "Control";
-            case "ROUTINE_COMPLETE" -> "Ampliado";
-            case "REDUCED" -> "Reducido";
-            case "MALOLACTIC" -> "Maloláctica";
-            default -> code;
-        };
-    }
 
     private int completed(UUID analysisId) {
         return jdbc.queryForObject("select count(*) from result where analysis_id = ? and is_current = true",
@@ -520,7 +515,7 @@ public class LaboratoryService {
 
     private static final String SAMPLE_SELECT = "select a.id as analysis_id, s.content_unit_id, a.panel_id, "
         + "s.code, d.code as origin_deposit, cu.code as content_code, l.code as lot_code, "
-        + "c.name as category, s.taken_at, p.code as panel_code, u.full_name as responsible, "
+        + "c.name as category, s.taken_at, p.code as panel_code, p.name as panel_name, u.full_name as responsible, "
         + "a.status::text, s.observations, a.processed_at, a.laboratory_name, a.equipment, "
         + "a.method_description, a.validation_note from sample s "
         + "join analysis a on a.sample_id = s.id join deposit d on d.id = s.deposit_id_at_sampling "
@@ -534,7 +529,7 @@ public class LaboratoryService {
     private record Qualifier(String code) {}
     private record SampleRow(UUID analysisId, UUID contentId, UUID panelId, String code, String originDeposit,
                              String contentCode, String lotCode, String category, Instant takenAt,
-                             String panelCode, String responsible, String status, String observations,
+                             String panelCode, String panelName, String responsible, String status, String observations,
                              Instant processedAt, String laboratory, String equipment, String method,
                              String validationNote) {}
 }

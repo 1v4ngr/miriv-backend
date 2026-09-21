@@ -140,9 +140,9 @@ public class AnalysisImportService {
         }
 
         UUID actor = context.userId();
-        // The CONTROL panel is exactly the analyser's worksheet (V17), so imported samples belong to it;
-        // columns the sheet does not bring simply stay empty.
-        UUID panelId = controlPanelId();
+        // The template the content's category uses by default: a must lands in the fermentation control,
+        // a wine in the wine analysis. Columns the sheet does not bring simply stay empty.
+        UUID panelId = defaultPanelFor(occupation.contentId());
         String sampleCode = codes.next("MU", row.takenAt().getYear());
         UUID sampleId = UUID.randomUUID();
         jdbc.update("insert into sample(id, code, content_unit_id, occupation_id, deposit_id_at_sampling, "
@@ -165,7 +165,12 @@ public class AnalysisImportService {
             occupation.contentCode(), values.size());
     }
 
-    private UUID controlPanelId() {
+    private UUID defaultPanelFor(UUID contentId) {
+        List<UUID> byCategory = jdbc.query("select pc.panel_id from content_unit cu "
+                + "join analysis_panel_category pc on pc.category_id = cu.category_id and pc.is_default "
+                + "join analysis_panel p on p.id = pc.panel_id and p.active where cu.id = ?",
+            (rs, index) -> rs.getObject(1, UUID.class), contentId);
+        if (!byCategory.isEmpty()) return byCategory.getFirst();
         return jdbc.query("select id from analysis_panel where code = 'CONTROL'",
             (rs, index) -> rs.getObject(1, UUID.class)).stream().findFirst().orElse(null);
     }

@@ -14,8 +14,19 @@
 #   SERVER_PORT  - puerto HTTP (default 8080, el application.yml).
 #   DB_URL / DB_USERNAME / DB_PASSWORD - overridean la conexión dev.
 #   SKIP_DOCKER  - si vale 1, no toca docker compose.
+#   NO_SEED      - si vale 1, no carga db/dev-seed (usar con una copia de prod).
+#
+# Argumentos:
+#   --no-seed    - equivalente a NO_SEED=1.
 
 set -euo pipefail
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-seed) NO_SEED=1 ;;
+    *) echo "ERROR: argumento desconocido: $arg" >&2; exit 1 ;;
+  esac
+done
 
 # 1) Directorio del script.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -120,6 +131,11 @@ PORT="${SERVER_PORT:-8080}"
 echo "==> mvn spring-boot:run (SERVER_PORT=$PORT)"
 echo "    health: http://localhost:${PORT}/actuator/health"
 echo "    docs:   http://localhost:${PORT}/docs"
+if [[ "${NO_SEED:-0}" == "1" ]]; then
+  # Copia de prod: solo migraciones versionadas, sin usuarios de desarrollo.
+  export SPRING_FLYWAY_LOCATIONS="classpath:db/migration"
+  echo "    seed:   desactivado (NO_SEED=1)"
+fi
 echo
 
 exec mvn spring-boot:run

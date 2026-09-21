@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.identity.service.AppUserDetailsService;
 import coop.miriv.enology.identity.service.AppUserPrincipal;
+import coop.miriv.enology.cellar.dto.StateReviewRequest;
+import coop.miriv.enology.cellar.service.ContentService;
 import coop.miriv.enology.support.IntegrationTest;
 import coop.miriv.enology.tracking.dto.TrackingDto.AlertCondition;
 import coop.miriv.enology.tracking.dto.TrackingDto.AlertRuleRequest;
@@ -39,6 +41,7 @@ class AlertServiceTest extends IntegrationTest {
     private static final String FINISHED = "Fermentación alcohólica terminada";
 
     @Autowired AlertService alerts;
+    @Autowired ContentService contents;
     @Autowired ParameterTargetService targets;
     @Autowired TrackingService tracking;
     @Autowired AppUserDetailsService userDetails;
@@ -131,6 +134,17 @@ class AlertServiceTest extends IntegrationTest {
         sample(content, "DENSITY", "1.0000", 1);
         sample(content, "DENSITY", "0.9970", 0);
         assertTrue(forRule(FINISHED).isEmpty(), "0.997 is low but the density is still moving");
+    }
+
+    @Test
+    void confirmingTheStateKeepsThePhaseRulesWorking() {
+        // Regression: confirmations were stored as "Activa" and never matched the rule's ACTIVE phase,
+        // so the finished-fermentation alert went silent as soon as an enologist confirmed the state.
+        UUID content = tank("A9", "RED", null);
+        contents.review("C-A9", new StateReviewRequest("alcoholic", "Activa", "Burbujeo y densidad bajando", null));
+        steadyLowDensity(content);
+
+        assertEquals(1, forRule(FINISHED).size(), "the rule must still see the confirmed ACTIVE phase");
     }
 
     @Test

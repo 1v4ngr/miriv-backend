@@ -70,10 +70,10 @@ public class ContentService {
             case "malolactic" -> "MALOLACTIC";
             default -> throw new BusinessRuleException("Proceso de fermentación no soportado.");
         };
-        Set<String> allowed = process.equals("ALCOHOLIC")
-            ? Set.of("No iniciada", "Activa", "Lenta", "Sospecha de parada", "Finalizada")
-            : Set.of("No iniciada", "Activa", "Lenta", "Finalizada", "No prevista");
-        if (!allowed.contains(request.decision())) throw new BusinessRuleException("Decisión de estado no soportada.");
+        Set<String> allowed = process.equals("ALCOHOLIC") ? FermentationPhase.ALCOHOLIC : FermentationPhase.MALOLACTIC;
+        // Stored as a code so alert rules and targets scoped by phase keep matching after a confirmation.
+        String decision = FermentationPhase.code(request.decision());
+        if (decision == null || !allowed.contains(decision)) throw new BusinessRuleException("Decisión de estado no soportada.");
         ContentResponse content = get(code);
         if (!content.active()) throw new BusinessRuleException("Solo el contenido activo puede tener un estado confirmado.");
         UUID actor = context.userId();
@@ -83,16 +83,44 @@ public class ContentService {
             (rs, index) -> rs.getString(1), contentId, process).stream().findFirst().orElse(null);
         jdbc.update("insert into fermentation_state_review(id, content_unit_id, process, previous_status, "
                 + "decision, reason, reviewed_by_id) values (?, ?, cast(? as fermentation_process), ?, ?, ?, ?)",
-            UUID.randomUUID(), contentId, process, previous, request.decision(), request.reason().trim(), actor);
+            UUID.randomUUID(), contentId, process, previous, decision, request.reason().trim(), actor);
         jdbc.update("insert into fermentation_state(id, content_unit_id, process, estimated_status, confirmed_status, "
                 + "confirmed_by_id, confirmed_at, confirmation_reason) "
                 + "values (?, ?, cast(? as fermentation_process), 'NOT_EVALUABLE', ?, ?, now(), ?) "
                 + "on conflict (content_unit_id, process) do update set confirmed_status = excluded.confirmed_status, "
                 + "confirmed_by_id = excluded.confirmed_by_id, confirmed_at = excluded.confirmed_at, "
                 + "confirmation_reason = excluded.confirmation_reason",
-            UUID.randomUUID(), contentId, process, request.decision(), actor, request.reason().trim());
+            UUID.randomUUID(), contentId, process, decision, actor, request.reason().trim());
         audit.record("content_unit", contentId, "STATE_REVIEWED",
-            process + " → " + request.decision() + " · " + request.reason().trim());
+            process + " → " + decision + " · " + request.reason().trim());
+
+        if (request.newCategory() != null && !request.newCategory().isBlank()) {
+            reclassify(contentId, process, decision, request.newCategory().trim(), request.reason().trim());
+        }
+    }
+
+    /**
+     * Closing the alcoholic fermentation is when the must becomes wine: the content changes category
+     * (Mosto → Tinto, Blanco…) in the same step, with the same reason, so both facts stay together.
+     */
+    private void reclassify(UUID contentId, String process, String decision, String category, String reason) {
+        if (!"ALCOHOLIC".equals(process) || !FermentationPhase.FINISHED.equals(decision)) {
+            throw new BusinessRuleException("La categoría solo se cambia al dar por finalizada la fermentación alcohólica.");
+        }
+        List<UUID> ids = jdbc.query("select id from internal_category where active = true "
+                + "and (lower(code) = lower(?) or lower(name) = lower(?))",
+            (rs, index) -> rs.getObject(1, UUID.class), category, category);
+        if (ids.isEmpty()) throw new BusinessRuleException("Categoría no encontrada: " + category);
+        UUID newId = ids.getFirst();
+        String previous = jdbc.query("select cat.name from content_unit cu left join internal_category cat "
+                + "on cat.id = cu.category_id where cu.id = ?", (rs, index) -> rs.getString(1), contentId)
+            .stream().findFirst().orElse(null);
+        String next = jdbc.queryForObject("select name from internal_category where id = ?", String.class, newId);
+        if (next.equals(previous)) return;
+        jdbc.update("update content_unit set category_id = ? where id = ?", newId, contentId);
+        audit.record("content_unit", contentId, "CONTENT_RECLASSIFIED", reason,
+            java.util.Map.of("category", previous == null ? "" : previous),
+            java.util.Map.of("category", next));
     }
 
     // F2-03: fermentation state / intent values become stable codes on the wire; the front

@@ -114,8 +114,8 @@ class CellarLaboratoryIntegrationTest extends IntegrationTest {
         assertEquals(2, plans.addVersion(movement.destinationContentCode(), secondVersion).currentVersion());
         assertEquals(2, plans.get(movement.destinationContentCode()).versions().size());
         contents.review(movement.destinationContentCode(),
-            new StateReviewRequest("alcoholic", "Activa", "Reviewed by enologist"));
-        assertEquals("Activa", contents.get(movement.destinationContentCode()).alcoholic().confirmation());
+            new StateReviewRequest("alcoholic", "Activa", "Reviewed by enologist", null));
+        assertEquals("ACTIVE", contents.get(movement.destinationContentCode()).alcoholic().confirmation());
         LocalDateTime takenAt = LocalDateTime.now(TIMEZONE).minusMinutes(30).withNano(0);
         String sampleCode = "T-M-" + suffix;
         var sample = laboratory.create(new NewSampleRequest(sampleCode, target,
