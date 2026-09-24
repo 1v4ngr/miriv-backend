@@ -30,8 +30,11 @@ public class LaboratoryController {
 
     public LaboratoryController(LaboratoryService service) { this.service = service; }
 
+    /** {@code ?view=summary}: the inbox list in one query (no results, no history); otherwise the full list. */
     @GetMapping
-    public List<SampleResponse> list() { return service.list(); }
+    public List<SampleResponse> list(@RequestParam(required = false) String view) {
+        return "summary".equals(view) ? service.listSummary() : service.list();
+    }
 
     @GetMapping("/{code}")
     public SampleResponse get(@PathVariable String code) { return service.get(code); }

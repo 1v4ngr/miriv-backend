@@ -41,6 +41,8 @@ app:
     jwt:
       secret: ${JWT_SECRET}
       access-token-minutes: ${APP_JWT_MINUTES:30}
+      # A session renews its token while the app is open, up to this many hours after signing in.
+      session-max-hours: ${APP_SESSION_MAX_HOURS:12}
       issuer: miriv-enology-tracking
     # Account that always holds SUPER_ADMIN (added on startup if missing). Empty disables it.
     super-admin-email: ${APP_SUPER_ADMIN_EMAIL:ivangoru22@gmail.com}

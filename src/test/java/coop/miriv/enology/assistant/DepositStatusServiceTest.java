@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import coop.miriv.enology.assistant.mcp.DepositStatusDto.DepositDetail;
 import coop.miriv.enology.assistant.mcp.DepositStatusDto.DepositStatus;
 import coop.miriv.enology.assistant.mcp.DepositStatusDto.ParameterTrend;
 import coop.miriv.enology.assistant.mcp.DepositStatusService;
@@ -102,6 +103,17 @@ class DepositStatusServiceTest extends IntegrationTest {
         assertEquals("rising", temperature.trend());
         assertEquals(0, temperature.change().compareTo(new BigDecimal("2.5")), "change: " + temperature.change());
         assertNotNull(temperature.latestAt());
+
+        // The detail screen as data: same content, the last analysis, a phase, compact readings.
+        DepositDetail detail = status.detail(deposit);
+        assertEquals(content, detail.content());
+        assertEquals("9", detail.position());
+        assertEquals("Steel", detail.material());
+        assertEquals(50, detail.fillPercent());
+        assertNotNull(detail.lastSampleAt(), "last analysis");
+        assertEquals(1L, detail.daysSinceLastSample());
+        assertNotNull(detail.phase(), "a Tinto with no fermentation state still falls in a configured phase");
+        assertTrue(detail.readings().stream().anyMatch(reading -> reading.parameter().equals("DENSITY") && "falling".equals(reading.trend())));
     }
 
     @Test

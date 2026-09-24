@@ -1,11 +1,16 @@
 package coop.miriv.enology.assistant.mcp;
 
+import coop.miriv.enology.assistant.mcp.DepositStatusDto.DepositDetail;
 import coop.miriv.enology.assistant.mcp.DepositStatusDto.DepositStatus;
 import coop.miriv.enology.assistant.mcp.DepositStatusDto.Measurement;
 import coop.miriv.enology.assistant.mcp.DepositStatusDto.ParameterTrend;
+import coop.miriv.enology.assistant.mcp.DepositStatusDto.Phase;
+import coop.miriv.enology.assistant.mcp.DepositStatusDto.Reading;
 import coop.miriv.enology.cellar.dto.DepositResponse;
 import coop.miriv.enology.cellar.dto.OccupationResponse;
 import coop.miriv.enology.cellar.service.DepositService;
+import coop.miriv.enology.identity.service.CurrentUserContext;
+import coop.miriv.enology.report.service.ReportPhaseService;
 import coop.miriv.enology.tracking.dto.TrackingDto.Event;
 import coop.miriv.enology.tracking.dto.TrackingDto.LatestContent;
 import coop.miriv.enology.tracking.dto.TrackingDto.LatestReading;
@@ -49,14 +54,45 @@ public class DepositStatusService {
     private final DepositService deposits;
     private final TrackingService tracking;
     private final AlertService alerts;
+    private final ReportPhaseService phases;
+    private final CurrentUserContext context;
     private final DateTimeFormatter dayFormat;
 
     public DepositStatusService(DepositService deposits, TrackingService tracking, AlertService alerts,
+                                ReportPhaseService phases, CurrentUserContext context,
                                 @Value("${app.timezone}") String timezone) {
         this.deposits = deposits;
         this.tracking = tracking;
         this.alerts = alerts;
+        this.phases = phases;
+        this.context = context;
         this.dayFormat = DateTimeFormatter.ofPattern("dd/MM HH:mm", Locale.of("es", "ES")).withZone(ZoneId.of(timezone));
+    }
+
+    /** The deposit detail screen as data (see {@link DepositDetail}), built on the 30-day status. */
+    @Transactional(readOnly = true)
+    public DepositDetail detail(String depositCode) {
+        DepositStatus status = status(depositCode, DEFAULT_WINDOW_DAYS);
+        DepositResponse deposit = deposits.get(depositCode);
+        OccupationResponse occupation = deposit.occupations().stream().filter(item -> item.exitDate() == null).findFirst().orElse(null);
+        Instant lastSample = occupation == null ? null : occupation.lastSampleAt();
+        Long daysSince = lastSample == null ? null : Duration.between(lastSample, Instant.now()).toDays();
+        Phase phase = null;
+        if (occupation != null) {
+            var current = phases.current(context.centerId(), occupation.contentCode());
+            if (current.phase() != null) {
+                phase = new Phase(current.phase().name(), current.phase().description(), current.manual(),
+                    current.automatic() == null ? null : current.automatic().name(), current.changedAt(), current.changedBy());
+            }
+        }
+        List<Reading> readings = status.parameters().stream()
+            .map(p -> new Reading(p.parameter(), p.name(), p.unit(), p.latest(), p.latestAt(), p.daysAgo(), p.status(),
+                p.target(), p.perDay(), p.trend()))
+            .toList();
+        return new DepositDetail(status.deposit(), status.zone(), deposit.position(), deposit.material(), status.status(),
+            status.capacityLiters(), status.refrigerated(), status.content(), status.lot(), status.category(),
+            status.volumeLiters(), status.fillPercent(), status.contentSince(), lastSample, daysSince, phase,
+            status.alcoholicState(), status.malolacticState(), readings, status.alerts(), status.notes());
     }
 
     @Transactional(readOnly = true)

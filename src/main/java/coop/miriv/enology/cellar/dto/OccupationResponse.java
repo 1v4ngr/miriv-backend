@@ -11,5 +11,7 @@ public record OccupationResponse(
     BigDecimal volumeLiters,
     String category,
     String alcoholicState,
-    String malolacticState
+    String malolacticState,
+    /** When the last sample of this content was taken in this deposit; null if never analysed here. */
+    Instant lastSampleAt
 ) {}

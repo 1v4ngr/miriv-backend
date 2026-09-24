@@ -28,7 +28,8 @@ public class DepositReadRepository {
                    o.start_at, o.end_at, o.volume_liters,
                    cat.name as category,
                    coalesce(fs.confirmed_status, fs.estimated_status, 'NOT_EVALUATED') as fermentation_status,
-                   coalesce(fs2.confirmed_status, fs2.estimated_status, 'NOT_EVALUATED') as malolactic_status
+                   coalesce(fs2.confirmed_status, fs2.estimated_status, 'NOT_EVALUATED') as malolactic_status,
+                   (select max(s.taken_at) from sample s where s.occupation_id = o.id) as last_sample_at
               from occupation o
               join deposit d on d.id = o.deposit_id
               join content_unit c on c.id = o.content_unit_id
@@ -45,7 +46,8 @@ public class DepositReadRepository {
                     rs.getString("content_code"), rs.getString("lot_code"),
                     rs.getTimestamp("start_at").toInstant(), instantOrNull(rs.getTimestamp("end_at")),
                     rs.getBigDecimal("volume_liters"), rs.getString("category"),
-                    rs.getString("fermentation_status"), rs.getString("malolactic_status"));
+                    rs.getString("fermentation_status"), rs.getString("malolactic_status"),
+                    instantOrNull(rs.getTimestamp("last_sample_at")));
                 result.computeIfAbsent(depositId, ignored -> new ArrayList<>()).add(occupation);
             }, centerId);
         return result;
@@ -59,7 +61,8 @@ public class DepositReadRepository {
                    o.start_at, o.end_at, o.volume_liters,
                    cat.name as category,
                    coalesce(fs.confirmed_status, fs.estimated_status, 'NOT_EVALUATED') as fermentation_status,
-                   coalesce(fs2.confirmed_status, fs2.estimated_status, 'NOT_EVALUATED') as malolactic_status
+                   coalesce(fs2.confirmed_status, fs2.estimated_status, 'NOT_EVALUATED') as malolactic_status,
+                   (select max(s.taken_at) from sample s where s.occupation_id = o.id) as last_sample_at
               from occupation o
               join content_unit c on c.id = o.content_unit_id
               join lot l on l.id = c.lot_id
@@ -72,7 +75,8 @@ public class DepositReadRepository {
                 rs.getString("content_code"), rs.getString("lot_code"),
                 rs.getTimestamp("start_at").toInstant(), instantOrNull(rs.getTimestamp("end_at")),
                 rs.getBigDecimal("volume_liters"), rs.getString("category"),
-                rs.getString("fermentation_status"), rs.getString("malolactic_status"))), depositId);
+                rs.getString("fermentation_status"), rs.getString("malolactic_status"),
+                instantOrNull(rs.getTimestamp("last_sample_at")))), depositId);
         return result;
     }
 

@@ -109,7 +109,9 @@ public class DepositService {
         Deposit deposit = deposits.findForUpdate(center.getId(), normalize(code))
             .filter(Deposit::isActive)
             .orElseThrow(() -> new NotFoundException("Depósito no encontrado."));
-        context.requireInZone("DEPOSIT_MANAGE", deposit.getZone().getId());
+        // A deposit without a zone yet can be placed by anyone who manages the target zone.
+        Zone previous = deposit.getZone();
+        if (previous != null) context.requireInZone("DEPOSIT_MANAGE", previous.getId());
         Zone zone = resolveZone(center.getId(), request.zone());
         context.requireInZone("DEPOSIT_MANAGE", zone.getId());
         BigDecimal occupied = readRepository.activeVolume(deposit.getId());
@@ -123,6 +125,10 @@ public class DepositService {
         deposit.setRefrigerated(request.refrigerated());
         deposit.setUpdatedAt(Instant.now());
         deposits.saveAndFlush(deposit);
+        if (previous == null || !previous.getId().equals(zone.getId())) {
+            audit.record("deposit", deposit.getId(), "DEPOSIT_MOVED", "Depósito " + deposit.getCode() + " movido de "
+                + (previous == null ? "sin zona" : previous.getName()) + " a " + zone.getName());
+        }
         return response(deposit, readRepository.occupationsByCenter(center.getId()),
             readRepository.cleaningByCenter(center.getId()));
     }

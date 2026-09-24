@@ -65,6 +65,25 @@ public class LaboratoryService {
         return rows.stream().map(this::response).toList();
     }
 
+    /**
+     * The laboratory inbox in ONE query: every sample with its counts (required / completed parameters) and the
+     * deposit its content is in now, but without results or their history (empty lists). The full list costs
+     * several queries per sample plus one per result; the detail of a sample is loaded when it is opened.
+     */
+    @Transactional(readOnly = true)
+    public List<SampleResponse> listSummary() {
+        return jdbc.query(SUMMARY_SELECT + " where d.center_id = ?" + context.readZoneFilter("d").sql() + " order by s.taken_at desc",
+            (rs, index) -> {
+                SampleRow row = sampleRow(rs);
+                return new SampleResponse(row.code(), row.originDeposit(), rs.getString("current_deposit"), row.contentCode(),
+                    row.lotCode(), row.category(), row.takenAt().atZone(timezone).toLocalDateTime().toString(),
+                    row.takenAt().atZone(timezone).toLocalDate(), null, row.panelName(), rs.getInt("completed_count"),
+                    rs.getInt("required_count"), statusLabel(row.status()), row.responsible(), false, List.of(), List.of(),
+                    row.observations(), row.processedAt() == null ? null : row.processedAt().atZone(timezone).toLocalDate(),
+                    row.laboratory(), row.equipment(), row.method(), row.validationNote());
+            }, prependZoneFilter(context.centerId(), context.readZoneFilter("d")));
+    }
+
     /** F2-07: avoid the N+1 in {@code ContentService.get} by filtering samples at SQL level. */
     @Transactional(readOnly = true)
     public List<SampleResponse> listByContent(String contentCode) {
@@ -300,14 +319,18 @@ public class LaboratoryService {
         return get(code);
     }
 
-    private SampleResponse response(SampleRow row) {
-        String status = switch (row.status()) {
+    private static String statusLabel(String status) {
+        return switch (status) {
             case "PENDING_VALIDATION" -> "Pendiente validar";
             case "VALIDATED" -> "Validado";
             case "INVALIDATED" -> "Invalidado";
             case "PARTIAL", "IN_PROGRESS" -> "Análisis parcial";
             default -> "Borrador";
         };
+    }
+
+    private SampleResponse response(SampleRow row) {
+        String status = statusLabel(row.status());
         List<SampleResultResponse> results = jdbc.query("select r.id, p.name as parameter, r.original_value, "
                 + "coalesce(r.original_unit, p.reference_unit) as unit, r.qualifier::text, r.qualifier_limit, "
                 + "a.method_description from result r join parameter p on p.id = r.parameter_id "
@@ -517,6 +540,15 @@ public class LaboratoryService {
         + "join content_unit cu on cu.id = s.content_unit_id join lot l on l.id = cu.lot_id "
         + "left join internal_category c on c.id = cu.category_id "
         + "join analysis_panel p on p.id = a.panel_id join app_user u on u.id = s.taken_by_id";
+
+    /** SAMPLE_SELECT plus the counts and current deposit the inbox shows, computed in the same query. */
+    private static final String SUMMARY_SELECT = SAMPLE_SELECT.replace(" from sample s ", ", "
+        + "(select count(*) from analysis_panel_parameter pp where pp.panel_id = a.panel_id and pp.required = true) as required_count, "
+        + "(select count(*) from analysis_panel_parameter pp join result r on r.parameter_id = pp.parameter_id "
+        + "  and r.analysis_id = a.id and r.is_current = true where pp.panel_id = a.panel_id and pp.required = true) as completed_count, "
+        + "coalesce((select cd.code from occupation co join deposit cd on cd.id = co.deposit_id "
+        + "  where co.content_unit_id = s.content_unit_id and co.end_at is null limit 1), d.code) as current_deposit "
+        + "from sample s ");
 
     private record Deposit(UUID id, UUID zoneId) {}
     private record OccupationAtTime(UUID occupationId, UUID contentId, String contentCode, String lotCode) {}

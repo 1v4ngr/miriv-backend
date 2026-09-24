@@ -43,6 +43,15 @@ public class DepositMcpTools {
         this.status = status;
     }
 
+    @Tool(name = "get_deposit_detail", description = "What the user sees on a deposit's detail screen, compact: "
+        + "the tank (zone, capacity, material), its content (lot, category, volume, fill %), the elaboration phase "
+        + "(and whether it was set by hand), the last analysis date, and the latest value of every parameter with "
+        + "its status against target and its trend. Use this FIRST for 'how is this deposit'; use get_deposit_status "
+        + "only when you need the reading-by-reading history.")
+    public DepositStatusDto.DepositDetail getDepositDetail(@ToolParam(description = "Deposit code, e.g. 239") String code) {
+        return status.detail(code);
+    }
+
     @Tool(name = "get_deposit_status", description = "How a deposit is doing, in one call: what it holds, "
         + "every measured parameter with its trend over the last N days (default 30) — latest value, change, "
         + "change per day, target range and status OK/WARNING/CRITICAL, plus the individual readings — and its "

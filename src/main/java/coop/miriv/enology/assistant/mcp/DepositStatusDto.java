@@ -56,4 +56,39 @@ public final class DepositStatusDto {
     ) {}
 
     public record Measurement(Instant at, BigDecimal value) {}
+
+    /**
+     * What the deposit detail screen shows, compact: the tank, its content, the elaboration phase (set by hand
+     * or derived), the last analysis and the latest value of each parameter with its status and trend — no
+     * reading-by-reading history (get_deposit_status has it).
+     */
+    public record DepositDetail(
+        String deposit,
+        String zone,
+        String position,
+        String material,
+        String status,
+        BigDecimal capacityLiters,
+        boolean refrigerated,
+        String content,
+        String lot,
+        String category,
+        BigDecimal volumeLiters,
+        Integer fillPercent,
+        Instant contentSince,
+        Instant lastSampleAt,
+        Long daysSinceLastSample,
+        Phase phase,
+        String alcoholicState,
+        String malolacticState,
+        List<Reading> readings,
+        List<String> alerts,
+        List<String> notes
+    ) {}
+
+    /** Elaboration phase: {@code manual} when set by hand (then {@code automatic} is what the rules would say). */
+    public record Phase(String name, String description, boolean manual, String automatic, Instant changedAt, String changedBy) {}
+
+    public record Reading(String parameter, String name, String unit, BigDecimal latest, Instant latestAt, Long daysAgo,
+                          String status, String target, BigDecimal perDay, String trend) {}
 }
