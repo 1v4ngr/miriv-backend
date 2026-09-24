@@ -1,6 +1,7 @@
 package coop.miriv.enology.cellar.service;
 
 import coop.miriv.enology.audit.AuditService;
+import coop.miriv.enology.cellar.dto.ContentCategoryRequest;
 import coop.miriv.enology.cellar.dto.ContentResponse;
 import coop.miriv.enology.cellar.dto.DepositResponse;
 import coop.miriv.enology.cellar.dto.FermentationStateResponse;
@@ -10,6 +11,7 @@ import coop.miriv.enology.common.exception.BusinessRuleException;
 import coop.miriv.enology.common.exception.NotFoundException;
 import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.laboratory.service.LaboratoryService;
+import coop.miriv.enology.report.service.ReportPhaseService;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -27,15 +29,18 @@ public class ContentService {
     private final LaboratoryService laboratory;
     private final CurrentUserContext context;
     private final AuditService audit;
+    private final ReportPhaseService phases;
 
     public ContentService(JdbcTemplate jdbc, DepositService deposits, LotService lots,
-                          LaboratoryService laboratory, CurrentUserContext context, AuditService audit) {
+                          LaboratoryService laboratory, CurrentUserContext context, AuditService audit,
+                          ReportPhaseService phases) {
         this.jdbc = jdbc;
         this.deposits = deposits;
         this.lots = lots;
         this.laboratory = laboratory;
         this.context = context;
         this.audit = audit;
+        this.phases = phases;
     }
 
     @Transactional(readOnly = true)
@@ -107,6 +112,26 @@ public class ContentService {
         if (!"ALCOHOLIC".equals(process) || !FermentationPhase.FINISHED.equals(decision)) {
             throw new BusinessRuleException("La categoría solo se cambia al dar por finalizada la fermentación alcohólica.");
         }
+        applyCategory(contentId, category, reason);
+        phases.dropManualPhaseIfCategoryMismatch(contentId, context.userId());
+    }
+
+    /**
+     * Direct change of the content's category (Blanco, Tinto, Rosado…) from the deposit detail, for when
+     * the type was recorded wrong or is only known later. Only the active content can change; the change
+     * is audited with the previous and new category.
+     */
+    @Transactional
+    public void changeCategory(String code, ContentCategoryRequest request) {
+        ContentResponse content = get(code);
+        if (!content.active()) throw new BusinessRuleException("Solo se puede cambiar el tipo del contenido activo.");
+        UUID contentId = jdbc.queryForObject("select id from content_unit where code = ?", UUID.class, normalize(code));
+        String reason = request.reason() == null || request.reason().isBlank() ? "Cambio de tipo" : request.reason().trim();
+        applyCategory(contentId, request.category().trim(), reason);
+        phases.dropManualPhaseIfCategoryMismatch(contentId, context.userId());
+    }
+
+    private void applyCategory(UUID contentId, String category, String reason) {
         List<UUID> ids = jdbc.query("select id from internal_category where active = true "
                 + "and (lower(code) = lower(?) or lower(name) = lower(?))",
             (rs, index) -> rs.getObject(1, UUID.class), category, category);

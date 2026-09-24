@@ -30,6 +30,7 @@ public final class PermissionRules {
         rule(null, "/api/admin/laboratories/**", "ORG_MANAGE"),
         rule(null, "/api/admin/parameter-targets/**", "LAB_CATALOG_MANAGE"),
         rule(null, "/api/admin/report-phases/**", "LAB_CATALOG_MANAGE"),
+        rule(PUT, "/api/report-phases/current", "STATE_CONFIRM"),
         rule(null, "/api/admin/alert-rules/**", "RULE_EDIT"),
         rule(POST, "/api/tracking/alerts/**", "INCIDENT_ACKNOWLEDGE"),
         rule(PUT, "/api/tracking/contents/**", "RULE_EDIT"),
@@ -58,6 +59,7 @@ public final class PermissionRules {
         rule(DELETE, "/api/movements/*", "MOVEMENT_REGISTER"),
         rule(POST, "/api/movements/**", "MOVEMENT_REGISTER", "MOVEMENT_PLAN"),
         rule(POST, "/api/contents/*/state-reviews", "STATE_CONFIRM"),
+        rule(PATCH, "/api/contents/*/category", "CONTENT_CORRECT"),
         // Laboratory
         rule(POST, "/api/laboratory/samples/*/validate", "ANALYSIS_VALIDATE"),
         rule(POST, "/api/laboratory/samples/*/results/*/correction", "RESULT_CORRECT"),

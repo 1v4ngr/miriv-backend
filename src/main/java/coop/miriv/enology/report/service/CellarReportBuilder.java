@@ -162,9 +162,10 @@ public class CellarReportBuilder {
         Map<UUID, String> malolactic = states(ids, "MALOLACTIC");
 
         // Current phase, then the phase filter.
+        Map<UUID, UUID> manual = phaseService.manualPhases(ids);
         Map<UUID, Phase> currentPhase = new HashMap<>();
         for (DepositRow row : occupied) {
-            currentPhase.put(row.contentId(), ReportPhaseService.resolve(phases, row.categoryCode(),
+            currentPhase.put(row.contentId(), ReportPhaseService.effective(phases, manual.get(row.contentId()), row.categoryCode(),
                 alcoholic.get(row.contentId()), malolactic.get(row.contentId())));
         }
         if (!phaseFilter.isEmpty()) {
@@ -283,10 +284,11 @@ public class CellarReportBuilder {
         Set<UUID> ids = rows.stream().map(DepositRow::contentId).filter(java.util.Objects::nonNull).collect(Collectors.toSet());
         Map<UUID, String> alcoholic = states(ids, "ALCOHOLIC");
         Map<UUID, String> malolactic = states(ids, "MALOLACTIC");
+        Map<UUID, UUID> manual = phaseService.manualPhases(ids);
         return rows.stream().sorted(Comparator.comparing(DepositRow::code, CellarReportBuilder::naturalCompare)).map(row -> {
             String phase = null;
             if (row.contentId() != null) {
-                Phase match = ReportPhaseService.resolve(phases, row.categoryCode(), alcoholic.get(row.contentId()), malolactic.get(row.contentId()));
+                Phase match = ReportPhaseService.effective(phases, manual.get(row.contentId()), row.categoryCode(), alcoholic.get(row.contentId()), malolactic.get(row.contentId()));
                 phase = match == null ? "NONE" : match.code();
             }
             return new coop.miriv.enology.report.dto.ReportDto.DepositOption(row.code(), row.name(), row.zoneCode(), row.content(),

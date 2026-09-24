@@ -1,6 +1,7 @@
 package coop.miriv.enology.report.web;
 
 import coop.miriv.enology.common.dto.PageResponse;
+import coop.miriv.enology.identity.service.CurrentUserContext;
 import coop.miriv.enology.report.dto.ReportDto.CreateReportRequest;
 import coop.miriv.enology.report.dto.ReportDto.JobView;
 import coop.miriv.enology.report.dto.ReportDto.Options;
@@ -8,9 +9,11 @@ import coop.miriv.enology.report.dto.ReportDto.PhaseOrderRequest;
 import coop.miriv.enology.report.dto.ReportDto.PhaseRequest;
 import coop.miriv.enology.report.dto.ReportDto.PhaseView;
 import coop.miriv.enology.report.service.ReportPhaseService;
+import coop.miriv.enology.report.service.ReportPhaseService.CurrentPhase;
 import coop.miriv.enology.report.service.ReportService;
 import coop.miriv.enology.report.service.ReportService.ReportFile;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.http.ContentDisposition;
@@ -37,10 +40,12 @@ public class ReportController {
 
     private final ReportService reports;
     private final ReportPhaseService phases;
+    private final CurrentUserContext context;
 
-    public ReportController(ReportService reports, ReportPhaseService phases) {
+    public ReportController(ReportService reports, ReportPhaseService phases, CurrentUserContext context) {
         this.reports = reports;
         this.phases = phases;
+        this.context = context;
     }
 
     @GetMapping("/api/reports/options")
@@ -73,6 +78,21 @@ public class ReportController {
 
     @GetMapping("/api/report-phases")
     public List<PhaseView> phases() { return phases.list(); }
+
+    /** Phase a content is in now (manual when set by hand); {@code phase} is null when nothing matches. */
+    @GetMapping("/api/report-phases/current")
+    public CurrentPhase currentPhase(@RequestParam String content) {
+        return phases.current(context.centerId(), content);
+    }
+
+    /** Sets the phase of a content by hand; a null {@code phaseId} goes back to the automatic phase. */
+    @PutMapping("/api/report-phases/current")
+    public CurrentPhase setCurrentPhase(@RequestParam String content, @Valid @RequestBody SetPhaseRequest request) {
+        return phases.setPhase(context.centerId(), content, request.phaseId(), request.categoryCode(), request.reason(), context.userId());
+    }
+
+    /** {@code categoryCode} reclassifies the content in the same step when the new phase needs another category. */
+    public record SetPhaseRequest(UUID phaseId, @Size(max = 40) String categoryCode, @Size(max = 500) String reason) {}
 
     @PostMapping("/api/admin/report-phases")
     @ResponseStatus(HttpStatus.CREATED)

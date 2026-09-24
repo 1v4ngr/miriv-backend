@@ -1,11 +1,13 @@
 package coop.miriv.enology.cellar.web;
 
+import coop.miriv.enology.cellar.dto.ContentCategoryRequest;
 import coop.miriv.enology.cellar.dto.ContentResponse;
 import coop.miriv.enology.cellar.dto.StateReviewRequest;
 import coop.miriv.enology.cellar.service.ContentService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -28,5 +30,11 @@ public class ContentController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void review(@PathVariable String code, @Valid @RequestBody StateReviewRequest request) {
         service.review(code, request);
+    }
+
+    @PatchMapping("/{code}/category")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void changeCategory(@PathVariable String code, @Valid @RequestBody ContentCategoryRequest request) {
+        service.changeCategory(code, request);
     }
 }
