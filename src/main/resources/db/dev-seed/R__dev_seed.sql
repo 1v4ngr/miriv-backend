@@ -46,3 +46,12 @@ select u.id, p.id, null, null, 'Semilla de desarrollo'
 from app_user u, permission p
 where u.username = 'laboratorio' and p.code = 'ANALYSIS_VALIDATE'
 on conflict do nothing;
+
+-- The dev "admin" is a system administrator who also needs to operate the cellar (e.g. fixing
+-- wrong entry dates), so we explicitly grant MOVEMENT_REGISTER and CONTENT_CORRECT on top of the
+-- ADMIN role, which intentionally does not include cellar permissions in production.
+insert into app_user_permission_grant (user_id, permission_id, zone_id, granted_by_id, reason)
+select u.id, p.id, null, null, 'Semilla de desarrollo (admin como super-usuario)'
+from app_user u, permission p
+where u.username = 'admin' and p.code in ('MOVEMENT_REGISTER', 'CONTENT_CORRECT')
+on conflict do nothing;

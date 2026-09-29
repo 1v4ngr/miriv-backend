@@ -179,7 +179,7 @@ public class TrackingService {
             for (String column : List.of("source_content_unit_id", "destination_content_unit_id")) {
                 UUID id = rs.getObject(column, UUID.class);
                 ContentRow row = id == null ? null : rows.get(id);
-                if (row != null) out.add(new Event(row.code(), instant(rs, "effective_at"), movementType(type), label, detail));
+                if (row != null) out.add(new Event(row.code(), instant(rs, "effective_at"), movementType(type), label, detail, rs.getString("code")));
             }
         }, args.toArray());
         return out.stream().distinct().toList();
@@ -204,7 +204,8 @@ public class TrackingService {
             out.add(new Event(row.code(), instant(rs, "reviewed_at"), "STATE_REVIEW",
                 "Revisión " + process + ": " + rs.getString("decision"),
                 (previous == null ? "" : previous + " → ") + rs.getString("decision")
-                    + (rs.getString("reason") == null ? "" : " · " + rs.getString("reason"))));
+                    + (rs.getString("reason") == null ? "" : " · " + rs.getString("reason")),
+                null));
         }, ids.toArray());
         return out;
     }

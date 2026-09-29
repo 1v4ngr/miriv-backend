@@ -27,7 +27,7 @@ public final class TrackingDto {
                                  List<TargetRange> targets) {}
 
     /** type is a stable code (TRANSFER, MIX, OPERATION, STATE_REVIEW…); label is ready to display. */
-    public record Event(String content, Instant at, String type, String label, String detail) {}
+    public record Event(String content, Instant at, String type, String label, String detail, String movementCode) {}
 
     public record Reading(BigDecimal value, String qualifier, BigDecimal limit, Instant takenAt, String sampleCode,
                           Long daysAgo, String status) {}
